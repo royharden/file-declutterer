@@ -1,10 +1,16 @@
 import { useMemo, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
+import { ProposeScreen } from './ProposeScreen'
+import { ReviewScreen } from './ReviewScreen'
 import { ScanScreen } from './ScanScreen'
 import { SandboxSession } from './session'
 
 export type TabId = 'scan' | 'propose' | 'review' | 'apply' | 'runs' | 'duplicates' | 'traps' | 'settings'
 
-const TABS: { id: TabId; label: string }[] = [{ id: 'scan', label: 'Home / Scan' }]
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'scan', label: 'Home / Scan' },
+  { id: 'propose', label: 'Propose' },
+  { id: 'review', label: 'Review / Approve' },
+]
 
 function useSession(session: SandboxSession): number {
   return useSyncExternalStore(
@@ -51,6 +57,8 @@ export function App() {
       </header>
       <main id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`}>
         {tab === 'scan' && <ScanScreen session={session} />}
+        {tab === 'propose' && <ProposeScreen session={session} onReview={() => setTab('review')} />}
+        {tab === 'review' && <ReviewScreen session={session} onApply={() => setTab('apply')} />}
       </main>
     </>
   )
