@@ -1,0 +1,4 @@
+project_id = "file-declutterer"
+
+[functions.propose-plan]
+verify_jwt = true
