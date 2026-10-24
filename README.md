@@ -16,8 +16,10 @@ This source was written on 2026-10-23 under a static-only construction mode. **N
 | Core: scan, path policy, proposals, validation, digest, journal, apply/rollback/undo, duplicates | written | no |
 | Hosted sandbox UI: Home/Scan, Propose, Review/Approve, Apply/Recovery, Runs/Undo, Duplicates/Restore, Traps, Settings/Help | written | no |
 | Tests (`tests/core`, `tests/sandbox`, `tests/contract`) | written | no |
-| Local CLI | in progress (see STATUS in the outer project folder) | no |
-| Native qualification (Windows identity, reparse, volume, process, mutex) | not built | no |
+| Local CLI: qualify, scan, propose/export, validate, runs, report, duplicates (read-only) | written | no |
+| Local CLI: apply, recover, undo, quarantine, restore (native writes) | written, **disabled**: the platform helper is a stub | no |
+| Optional loopback local AI | written; protocol not verified against official docs | no |
+| Native qualification helper (Windows volume type, reparse/cloud attributes, file IDs, process identity, root mutex) | interface only | no |
 
 ## Hosted journey
 
@@ -28,6 +30,26 @@ This source was written on 2026-10-23 under a static-only construction mode. **N
 5. **Runs / Undo**: journal viewer, undo preview, and an "external edit" simulation to see changed files refused.
 6. **Duplicates / Restore**: exact SHA-256 groups, a highlighted keeper suggestion, nothing preselected; a separate reviewed quarantine plan; restore from a named quarantine run.
 7. **Traps**: run the sandbox trap cases in the page. Native cases show "Not run".
+
+## Local CLI
+
+Build it locally (`npm run build:cli`) and run the built bin; there is no published npx package.
+
+```text
+node dist-cli/main.js qualify  "D:\Sorting\Inbox" --unmanaged
+node dist-cli/main.js scan     "D:\Sorting\Inbox"
+node dist-cli/main.js propose  "D:\Sorting\Inbox" --mode heuristic --out plan.json
+node dist-cli/main.js validate "D:\Sorting\Inbox" --plan plan.json        # prints the fresh digest
+node dist-cli/main.js apply    "D:\Sorting\Inbox" --plan plan.json --confirm <digest> --unmanaged
+node dist-cli/main.js runs | report | recover | undo --preview | undo --yes
+node dist-cli/main.js duplicates | quarantine --select <path> | restore --run <id> --entry <path>
+```
+
+- One explicit folder. Refused: UNC/network paths, drive roots, links/junctions in the ancestry, a real path that differs from the given path, and folders inside OneDrive or other recognizable cloud-sync roots. Detection of sync agents is heuristic, so `--unmanaged` must state that nothing syncs, backs up or indexes the folder.
+- Qualification never writes a probe. Project folders and protected names are left alone exactly as in the sandbox.
+- Private state lives in `%LOCALAPPDATA%\file-declutterer\<rootId>\` (plans, journals, LOCK), never inside the folder. The root id comes from the folder's volume and file identity; path hints never reassociate history on their own. A path that was registered under a different identity (recreated or remounted folder) blocks writes until resolved.
+- **Native writes are currently refused.** Apply, recover, undo, quarantine and restore need the Windows platform helper (volume type, reparse and cloud attributes, qualified file IDs, process start identity, and a named root mutex that guards the LOCK file). `cli/platform/helper.ts` defines that boundary and ships an unavailable stub. Enabling writes requires building that helper and passing the native trap cases on a disposable NTFS volume first.
+- Local AI is optional: set `DECLUTTER_MODEL_URL` (loopback only) and `DECLUTTER_MODEL_NAME`. `--mode smart` sends only unknown-extension files; `--mode local` sends all eligible files. The CLI prints exactly what would be sent (opaque id, name, extension, parent folder name) and sends nothing without `--send-to-local-model`. Batches of at most 80 rows / 32 KiB, 64 KiB responses, 30 s per attempt, 7 attempts and 240 s per pass, no retries; failures leave those rows without AI proposals.
 
 ## Scripts (pending: none run yet)
 
