@@ -1,0 +1,39 @@
+{
+  "name": "file-declutterer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Review-first file organizer: hosted in-memory sandbox plus a local Node CLI. Proposals only; whole-plan validation, digest-bound approval, write-ahead journal, recovery and undo.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "file-declutterer": "dist-cli/main.js"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run build:web",
+    "build:web": "npm run typecheck:web && vite build",
+    "build:cli": "tsc -p tsconfig.cli.json && node scripts/write-cli-shim.mjs",
+    "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
+    "typecheck:cli": "tsc -p tsconfig.cli.json --noEmit",
+    "typecheck": "npm run typecheck:web && npm run typecheck:cli",
+    "test": "vitest run",
+    "test:native": "vitest run --config vitest.native.config.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.5"
+  }
+}
