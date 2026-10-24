@@ -3,6 +3,7 @@ import * as fsp from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import type { JournalStore } from '../src/core/fs-port.js'
+import { isWithin } from './within.js'
 
 // Private CLI state outside the selected root (PLAN §7):
 //   %LOCALAPPDATA%\file-declutterer\<rootId>\root.json         path hints (never authority)
@@ -26,8 +27,7 @@ export function rootStateDir(rootId: string, env?: NodeJS.ProcessEnv): string {
 
 /** True when the state directory would sit inside the selected root (refused). */
 export function stateInsideRoot(rootPath: string, stateDir: string): boolean {
-  const rel = path.relative(path.resolve(rootPath), path.resolve(stateDir))
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  return isWithin(path.resolve(stateDir), path.resolve(rootPath))
 }
 
 async function fsyncFile(file: string): Promise<void> {

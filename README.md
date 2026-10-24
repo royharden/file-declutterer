@@ -16,6 +16,7 @@ This source was written on 2026-10-23 under a static-only construction mode. **N
 | Core: scan, path policy, proposals, validation, digest, journal, apply/rollback/undo, duplicates | written | no |
 | Hosted sandbox UI: Home/Scan, Propose, Review/Approve, Apply/Recovery, Runs/Undo, Duplicates/Restore, Traps, Settings/Help | written | no |
 | Tests (`tests/core`, `tests/sandbox`, `tests/contract`) | written | no |
+| Native harness (`tests/native`, `npm run test:native`, disposable temp folders; qualification cases are todo) | written | no |
 | Local CLI: qualify, scan, propose/export, validate, runs, report, duplicates (read-only) | written | no |
 | Local CLI: apply, recover, undo, quarantine, restore (native writes) | written, **disabled**: the platform helper is a stub | no |
 | Optional loopback local AI | written; protocol not verified against official docs | no |

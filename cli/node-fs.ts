@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
+import { isWithin } from './within.js'
 import { ancestorsOf, FsError, type DirEntry, type FsErrorCode, type FsPort, type StatInfo } from '../src/core/fs-port.js'
 
 // Native FsPort over one explicit root. Never imported by the web build. Paths stay
@@ -46,8 +47,7 @@ export class NodeFs implements FsPort {
       throw new FsError('EUNSUPPORTED', `Unsafe relative path: ${JSON.stringify(rel)}`)
     }
     const full = path.join(this.root, ...parts)
-    const relative = path.relative(this.root, full)
-    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new FsError('EUNSUPPORTED', `Path escapes the root: ${rel}`)
+    if (!isWithin(full, this.root)) throw new FsError('EUNSUPPORTED', `Path escapes the root: ${rel}`)
     return full
   }
 

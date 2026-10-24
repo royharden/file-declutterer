@@ -1,6 +1,5 @@
 import { randomBytes } from 'node:crypto'
 import * as fsp from 'node:fs/promises'
-import * as path from 'node:path'
 import { parseArgs } from 'node:util'
 import { findDuplicates, quarantineRows, restoreCandidates, restoreRows } from '../src/core/duplicates.js'
 import { ambiguousFileIds, heuristicProposals } from '../src/core/heuristic.js'
@@ -14,6 +13,7 @@ import { buildOrganizeRows, defaultSelection, editOrganizeRow, isBlocked, hasWar
 import { disclosureFor, readLocalAiConfig, runLocalAi } from './local-ai.js'
 import { acquireRootLock } from './lock.js'
 import { NodeFs } from './node-fs.js'
+import { isWithin, realLocation } from './within.js'
 import { loadPlatformHelper, type PlatformHelper } from './platform/helper.js'
 import { qualifyRoot, type Qualification } from './qualify.js'
 import { FileJournalStore, registerRoot, rootsHintingPath, rootStateDir, stateInsideRoot } from './state.js'
@@ -98,9 +98,9 @@ async function openRoot(root: string, unmanaged: boolean, forWrite: boolean): Pr
 }
 
 /** Output files (exports, reports) must never be written inside the selected root. */
-function outsideRoot(o: Opened, file: string): string {
-  const rel = path.relative(o.q.rootPath, path.resolve(file))
-  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) throw new Usage(`Refusing to write ${file} inside the selected folder.`)
+async function outsideRoot(o: Opened, file: string): Promise<string> {
+  // Resolve links/junctions on the existing part of the path; rootPath already equals its realpath.
+  if (isWithin(await realLocation(file), o.q.rootPath)) throw new Usage(`Refusing to write ${file} inside the selected folder.`)
   return file
 }
 
@@ -242,7 +242,7 @@ async function run(argv: string[]): Promise<number> {
       if (!o) return EXIT.refused
       const scan = await scanFor(o.fs)
       printScan(scan)
-      if (values.json) await fsp.writeFile(outsideRoot(o, values.json), JSON.stringify(scan, null, 2), { encoding: 'utf8', flag: 'wx' })
+      if (values.json) await fsp.writeFile(await outsideRoot(o, values.json), JSON.stringify(scan, null, 2), { encoding: 'utf8', flag: 'wx' })
       return scan.status === 'complete' ? EXIT.ok : EXIT.refused
     }
     case 'propose':
@@ -298,7 +298,7 @@ async function run(argv: string[]): Promise<number> {
       const plan = buildPlan({ planId: newId('plan'), kind: 'organize', scan, config: DEFAULT_ROOT_CONFIG, rows })
       out(`accepted ${plan.rows.length} move(s); digest ${plan.digest}`)
       if (values.out) {
-        await fsp.writeFile(outsideRoot(o, values.out), JSON.stringify(plan, null, 2), { encoding: 'utf8', flag: 'wx' })
+        await fsp.writeFile(await outsideRoot(o, values.out), JSON.stringify(plan, null, 2), { encoding: 'utf8', flag: 'wx' })
         out(`plan written to ${values.out} (not approved; apply revalidates and asks for the fresh digest)`)
       }
       return EXIT.ok
@@ -350,7 +350,7 @@ async function run(argv: string[]): Promise<number> {
       const preview = summary.problem ? [] : await previewReverse({ fs: o.fs, store: o.store }, values.run)
       const report = { profile: 'native', platform: process.platform, version: VERSION, rootId: o.q.rootId, run: summary, currentState: preview }
       out(JSON.stringify(report, null, 2))
-      if (values.json) await fsp.writeFile(outsideRoot(o, values.json), JSON.stringify(report, null, 2), { encoding: 'utf8', flag: 'wx' })
+      if (values.json) await fsp.writeFile(await outsideRoot(o, values.json), JSON.stringify(report, null, 2), { encoding: 'utf8', flag: 'wx' })
       return EXIT.ok
     }
     case 'recover': {

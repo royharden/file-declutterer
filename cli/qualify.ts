@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
 import type { PlatformHelper } from './platform/helper.js'
+import { isWithin } from './within.js'
 
 // Non-writing root qualification (PLAN §6). Runs before any hashing. Never writes a probe.
 // Read-only commands need the portable checks; native writes additionally need the platform
@@ -27,10 +28,6 @@ function syncRootsFromEnv(env: NodeJS.ProcessEnv): string[] {
     .map((v) => path.resolve(v).toLowerCase())
 }
 
-function isWithin(child: string, parent: string): boolean {
-  const rel = path.relative(parent, child)
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
-}
 
 export async function qualifyRoot(input: string, helper: PlatformHelper, options: { unmanaged: boolean; env?: NodeJS.ProcessEnv }): Promise<Qualification> {
   const env = options.env ?? process.env
