@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import * as fsp from 'node:fs/promises'
+import * as path from 'node:path'
 import { parseArgs } from 'node:util'
 import { findDuplicates, quarantineRows, restoreCandidates, restoreRows } from '../src/core/duplicates.js'
 import { ambiguousFileIds, heuristicProposals } from '../src/core/heuristic.js'
@@ -94,6 +95,13 @@ async function openRoot(root: string, unmanaged: boolean, forWrite: boolean): Pr
   const store = new FileJournalStore(stateDir)
   const fs = new NodeFs({ root: q.rootPath, rootId: q.rootId, writesEnabled: forWrite && q.writeOk, identityQualified: q.identityQualified })
   return { q, helper, stateDir, store, fs, ambiguousHistory }
+}
+
+/** Output files (exports, reports) must never be written inside the selected root. */
+function outsideRoot(o: Opened, file: string): string {
+  const rel = path.relative(o.q.rootPath, path.resolve(file))
+  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) throw new Usage(`Refusing to write ${file} inside the selected folder.`)
+  return file
 }
 
 function newId(prefix: string): string {
@@ -234,7 +242,7 @@ async function run(argv: string[]): Promise<number> {
       if (!o) return EXIT.refused
       const scan = await scanFor(o.fs)
       printScan(scan)
-      if (values.json) await fsp.writeFile(values.json, JSON.stringify(scan, null, 2), { encoding: 'utf8', flag: 'wx' })
+      if (values.json) await fsp.writeFile(outsideRoot(o, values.json), JSON.stringify(scan, null, 2), { encoding: 'utf8', flag: 'wx' })
       return scan.status === 'complete' ? EXIT.ok : EXIT.refused
     }
     case 'propose':
@@ -290,7 +298,7 @@ async function run(argv: string[]): Promise<number> {
       const plan = buildPlan({ planId: newId('plan'), kind: 'organize', scan, config: DEFAULT_ROOT_CONFIG, rows })
       out(`accepted ${plan.rows.length} move(s); digest ${plan.digest}`)
       if (values.out) {
-        await fsp.writeFile(values.out, JSON.stringify(plan, null, 2), { encoding: 'utf8', flag: 'wx' })
+        await fsp.writeFile(outsideRoot(o, values.out), JSON.stringify(plan, null, 2), { encoding: 'utf8', flag: 'wx' })
         out(`plan written to ${values.out} (not approved; apply revalidates and asks for the fresh digest)`)
       }
       return EXIT.ok
@@ -302,7 +310,8 @@ async function run(argv: string[]): Promise<number> {
       const r = await reconstruct(o, await fsp.readFile(values.plan, 'utf8'))
       if (!r) return EXIT.refused
       printRows(r.rows)
-      out(`fresh digest ${r.fresh.digest}${r.fresh.digest === r.plan.digest ? ' (matches the file)' : ' (differs from the file; review the rows above)'}`)
+      out(`fresh digest ${r.fresh.digest}`)
+      out('This digest is recomputed from the current folder (imported rows, fresh scan); it intentionally differs from the exported file. Review the rows above, then confirm it.')
       out(`to apply: file-declutterer apply "${root}" --plan "${values.plan}" --confirm ${r.fresh.digest} --unmanaged`)
       return EXIT.ok
     }
@@ -341,7 +350,7 @@ async function run(argv: string[]): Promise<number> {
       const preview = summary.problem ? [] : await previewReverse({ fs: o.fs, store: o.store }, values.run)
       const report = { profile: 'native', platform: process.platform, version: VERSION, rootId: o.q.rootId, run: summary, currentState: preview }
       out(JSON.stringify(report, null, 2))
-      if (values.json) await fsp.writeFile(values.json, JSON.stringify(report, null, 2), { encoding: 'utf8', flag: 'wx' })
+      if (values.json) await fsp.writeFile(outsideRoot(o, values.json), JSON.stringify(report, null, 2), { encoding: 'utf8', flag: 'wx' })
       return EXIT.ok
     }
     case 'recover': {

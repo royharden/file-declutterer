@@ -52,8 +52,11 @@ export class NodeFs implements FsPort {
   }
 
   private async assertAncestry(rel: string): Promise<void> {
-    const rootInfo = await fsp.lstat(this.root)
+    const rootInfo = await fsp.lstat(this.root, { bigint: true })
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new FsError('EUNSUPPORTED', 'Root is no longer a plain directory.')
+    // Same derivation as cli/qualify.ts: a renamed-away root replaced by a look-alike halts here.
+    const currentId = `r-${createHash('sha256').update(`${rootInfo.dev}:${rootInfo.ino}`).digest('hex').slice(0, 16)}`
+    if (currentId !== this.rootId) throw new FsError('EUNSUPPORTED', 'Root identity changed since qualification; refusing.')
     for (const ancestor of ancestorsOf(rel)) {
       let info
       try {

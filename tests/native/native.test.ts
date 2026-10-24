@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import * as fsp from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
@@ -43,8 +44,10 @@ async function manifest(): Promise<string> {
   return out.sort().join('\n')
 }
 
+let rootId = ''
+
 function nodeFs(): NodeFs {
-  return new NodeFs({ root, rootId: 'native-test-root', writesEnabled: true, identityQualified: true })
+  return new NodeFs({ root, rootId, writesEnabled: true, identityQualified: true })
 }
 
 async function approvedPlan(fs: NodeFs, planId: string) {
@@ -57,7 +60,10 @@ async function approvedPlan(fs: NodeFs, planId: string) {
 }
 
 beforeEach(async () => {
-  root = await fsp.mkdtemp(path.join(os.tmpdir(), 'declutter-root-'))
+  // realpath: the temp dir may be reported through an 8.3 short name.
+  root = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'declutter-root-')))
+  const info = await fsp.lstat(root, { bigint: true })
+  rootId = `r-${createHash('sha256').update(`${info.dev}:${info.ino}`).digest('hex').slice(0, 16)}`
   state = await fsp.mkdtemp(path.join(os.tmpdir(), 'declutter-state-'))
   await write('report.pdf', 'pdf bytes')
   await write('photo.jpg', 'jpg bytes')
@@ -118,7 +124,7 @@ describe('native executor on a disposable root', () => {
   })
 
   it('refuses writes when the adapter is not write-enabled', async () => {
-    const fs = new NodeFs({ root, rootId: 'native-test-root', writesEnabled: false, identityQualified: false })
+    const fs = new NodeFs({ root, rootId, writesEnabled: false, identityQualified: false })
     await expect(fs.mkdir('x')).rejects.toThrow(/disabled/)
   })
 
