@@ -30,6 +30,7 @@ The local CLI (`cli/`) and any Windows qualification helper run on the user's ow
 - Runtime: Node >= 20.11 (declared in `package.json` engines; not verified).
 - Install: no lockfile yet. First authorized `npm install` generates `package-lock.json`; afterwards `npm ci`.
 - Web build: `npm run build` -> `dist/` (typecheck + Vite). Never run.
+- The web bundle must not include `cli/`, `src/engine/` or `supabase/`; `tests/contract/web-graph.test.ts` checks the source import graph (not yet run).
 - Dependencies (pinned ranges, unverified together): react ^18.3.1, react-dom ^18.3.1, vite ^5.4.0, @vitejs/plugin-react ^4.3.1, typescript ^5.5.4, vitest ^2.0.5, @types/node ^20.14.0.
 
 ## Status by surface
@@ -37,8 +38,8 @@ The local CLI (`cli/`) and any Windows qualification helper run on the user's ow
 | Surface | Source | Runtime |
 |---|---|---|
 | Hosted sandbox | built in source | unverified |
-| Local CLI | see outer STATUS.md | unverified |
-| Native qualification | not built | native writes disabled |
+| Local CLI (`cli/`, built with `npm run build:cli`, runs on the user's machine only) | built in source | unverified; native writes refused (platform helper is a stub) |
+| Native qualification helper | interface only (`cli/platform/helper.ts`) | not built |
 | Bolt import / build | not attempted | pending |
 
 ## Acceptance checks (pending)
