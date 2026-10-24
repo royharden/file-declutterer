@@ -28,7 +28,6 @@ function syncRootsFromEnv(env: NodeJS.ProcessEnv): string[] {
     .map((v) => path.resolve(v).toLowerCase())
 }
 
-
 export async function qualifyRoot(input: string, helper: PlatformHelper, options: { unmanaged: boolean; env?: NodeJS.ProcessEnv }): Promise<Qualification> {
   const env = options.env ?? process.env
   const reasons: string[] = []
