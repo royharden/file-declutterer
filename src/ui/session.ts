@@ -1,8 +1,22 @@
 import { MemoryFs, MemoryJournalStore } from '../adapters/memory-fs'
 import { createSandbox, simulatedResponse } from '../adapters/sandbox-seed'
+import { InterruptError } from '../core/fs-port'
 import { heuristicProposals } from '../core/heuristic'
+import { parseJournal, type JournalRecord } from '../core/journal-codec'
 import { approvalIsCurrent, approve, buildPlan, parseMovePlan, reconstructOrganizeRows, type Approval, type MovePlan } from '../core/plan'
 import { parseProposalResponse, type ParsedProposals, type RejectedProposal } from '../core/proposal-schema'
+import {
+  applyPlan,
+  listRuns,
+  newWorkBlockers,
+  previewReverse,
+  reverseRun,
+  undoBlockers,
+  type ExecContext,
+  type ReversePreviewEntry,
+  type RunReport,
+  type RunSummary,
+} from '../core/runs'
 import { scanRoot } from '../core/scan'
 import { DEFAULT_ROOT_CONFIG, type RootConfig } from '../core/scan-policy'
 import type { ProposalSource, ScanManifest } from '../core/types'
@@ -45,6 +59,15 @@ export class SandboxSession {
   plan: MovePlan | null = null
   imported: ImportedReview | null = null
 
+  // Apply / recovery / runs
+  runs: RunSummary[] = []
+  lastReport: RunReport | null = null
+  /** Interrupt at the Nth journal/file-system boundary of the next action (sandbox only). */
+  interruptAt: number | null = null
+  boundaries: string[] = []
+  lastInterrupt: string | null = null
+  preview: { runId: string; entries: ReversePreviewEntry[] } | null = null
+
   private counter = 0
   private listeners = new Set<() => void>()
 
@@ -77,6 +100,12 @@ export class SandboxSession {
     this.scan = null
     this.error = null
     this.clearProposals()
+    this.runs = []
+    this.lastReport = null
+    this.interruptAt = null
+    this.boundaries = []
+    this.lastInterrupt = null
+    this.preview = null
     this.changed()
   }
 
@@ -254,5 +283,108 @@ export class SandboxSession {
         unmatched,
       }
     })
+  }
+
+  // ---- apply, recovery, undo ----
+
+  private execContext(): ExecContext {
+    this.boundaries = []
+    this.lastInterrupt = null
+    const target = this.interruptAt
+    return {
+      fs: this.fs,
+      store: this.store,
+      checkpoint: (boundary: string) => {
+        this.boundaries.push(boundary)
+        if (target !== null && this.boundaries.length === target) throw new InterruptError(boundary)
+      },
+    }
+  }
+
+  async refreshRuns(): Promise<void> {
+    this.runs = await listRuns(this.store)
+  }
+
+  get blockers(): string[] {
+    return newWorkBlockers(this.runs)
+  }
+
+  setInterrupt(n: number | null): void {
+    this.interruptAt = n !== null && Number.isInteger(n) && n > 0 ? n : null
+    this.changed()
+  }
+
+  private async runAction(action: (ctx: ExecContext) => Promise<RunReport>): Promise<void> {
+    await this.guard(async () => {
+      try {
+        this.lastReport = await action(this.execContext())
+      } catch (error) {
+        if (!(error instanceof InterruptError)) throw error
+        this.lastInterrupt = `Interrupted at boundary ${this.boundaries.length} (${error.boundary}). The journal keeps what was flushed; recover from Apply / Recovery.`
+        this.lastReport = null
+      } finally {
+        this.interruptAt = null
+        this.preview = null
+        await this.refreshRuns()
+      }
+    })
+  }
+
+  async applyApproved(): Promise<void> {
+    const plan = this.plan
+    const approval = this.approval
+    if (!plan) return
+    await this.refreshRuns()
+    await this.runAction((ctx) => applyPlan(ctx, plan, approval, newWorkBlockers(this.runs)))
+    // A plan is single-use: its id becomes the run id. Re-plan from a fresh scan afterwards.
+    if (this.runs.some((r) => r.runId === plan.planId)) {
+      this.clearProposals()
+      this.scan = null
+      this.changed()
+    }
+  }
+
+  async rollback(runId: string): Promise<void> {
+    await this.runAction((ctx) => reverseRun(ctx, runId, 'rollback'))
+  }
+
+  async previewUndo(runId: string): Promise<void> {
+    await this.guard(async () => {
+      this.preview = { runId, entries: await previewReverse({ fs: this.fs, store: this.store }, runId) }
+    })
+  }
+
+  undoBlockersFor(runId: string): string[] {
+    return undoBlockers(this.runs, runId)
+  }
+
+  async undo(runId: string): Promise<void> {
+    await this.refreshRuns()
+    const blockers = undoBlockers(this.runs, runId)
+    await this.runAction((ctx) => reverseRun(ctx, runId, 'undo', blockers))
+  }
+
+  async journalRecords(runId: string): Promise<{ records: JournalRecord[]; problem: string | null; torn: boolean }> {
+    const parsed = parseJournal((await this.store.readJournal(runId)) ?? '', { runId })
+    return {
+      records: parsed.records,
+      problem: parsed.corrupt ? `line ${parsed.corrupt.line}: ${parsed.corrupt.reason}` : null,
+      torn: parsed.tornTail !== null,
+    }
+  }
+
+  /** Simulate an edit made outside the app (T18 demo). Bytes change in place. */
+  simulateExternalEdit(path: string): void {
+    const bytes = this.fs.readFile(path)
+    if (!bytes) {
+      this.error = `No file at ${path}.`
+    } else {
+      const edited = new Uint8Array(bytes.length + 9)
+      edited.set(bytes)
+      edited.set([0x20, 0x28, 0x65, 0x64, 0x69, 0x74, 0x65, 0x64, 0x29], bytes.length) // " (edited)"
+      this.fs.writeFile(path, edited)
+      this.error = null
+    }
+    this.changed()
   }
 }

@@ -1,6 +1,8 @@
 import { useMemo, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
+import { ApplyScreen } from './ApplyScreen'
 import { ProposeScreen } from './ProposeScreen'
 import { ReviewScreen } from './ReviewScreen'
+import { RunsScreen } from './RunsScreen'
 import { ScanScreen } from './ScanScreen'
 import { SandboxSession } from './session'
 
@@ -10,6 +12,8 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'scan', label: 'Home / Scan' },
   { id: 'propose', label: 'Propose' },
   { id: 'review', label: 'Review / Approve' },
+  { id: 'apply', label: 'Apply / Recovery' },
+  { id: 'runs', label: 'Runs / Undo' },
 ]
 
 function useSession(session: SandboxSession): number {
@@ -59,6 +63,8 @@ export function App() {
         {tab === 'scan' && <ScanScreen session={session} />}
         {tab === 'propose' && <ProposeScreen session={session} onReview={() => setTab('review')} />}
         {tab === 'review' && <ReviewScreen session={session} onApply={() => setTab('apply')} />}
+        {tab === 'apply' && <ApplyScreen session={session} onRuns={() => setTab('runs')} />}
+        {tab === 'runs' && <RunsScreen session={session} />}
       </main>
     </>
   )
