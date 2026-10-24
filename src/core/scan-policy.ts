@@ -49,7 +49,8 @@ const LOCK_AND_PACKAGE = new Set([
 ])
 const APP_STATE = new Set(['desktop.ini', 'thumbs.db', '.ds_store', 'icon\r'])
 const CREDENTIAL_NAME = /^(\.env(\..*)?|.*\.(pem|key|pfx|p12|kdbx|keystore|jks|ovpn)|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|credentials?(\..*)?|secrets?(\..*)?|\.npmrc|\.netrc|\.pgpass|\.htpasswd)$/i
-const NOTICE_NAME = /^(readme|license|licence|copying|notice|authors)([._-].*)?$/i
+// README*, LICENSE*, COPYING* (PLAN §6): any name starting with these words.
+const NOTICE_NAME = /^((readme|license|licence|copying).*|(notice|authors)([._-].*)?)$/i
 
 /**
  * Why a file must not be organized, or null if it is eligible. Applied symmetrically to

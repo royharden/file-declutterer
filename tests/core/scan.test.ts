@@ -23,6 +23,12 @@ describe('path policy (T09, T10)', () => {
       expect(checkRelativePath(path).ok).toBe(false)
     },
   )
+  it('rejects compatibility characters that fold to path syntax (T09)', () => {
+    expect(checkRelativePath('a／b').ok).toBe(false)
+    expect(checkProposedBasename('．．').ok).toBe(false)
+    expect(checkProposedBasename('x：y').ok).toBe(false)
+    expect(checkProposedBasename('a﹨b').ok).toBe(false)
+  })
   it('accepts a literal %41 and rejects encoded traversal in proposals', () => {
     expect(checkRelativePath('%41.txt').ok).toBe(true)
     expect(checkProposedBasename('%41').ok).toBe(true)

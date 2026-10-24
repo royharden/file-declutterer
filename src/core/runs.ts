@@ -78,6 +78,13 @@ async function matches(fs: FsPort, path: string, info: StatInfo | null, expected
   }
 }
 
+/** True when both paths currently name one file with a known identity. */
+async function sameIdentity(fs: FsPort, a: string, b: string): Promise<boolean> {
+  const x = await fs.stat(a)
+  const y = await fs.stat(b)
+  return x !== null && y !== null && x.kind === 'file' && y.kind === 'file' && x.identity !== null && x.identity === y.identity
+}
+
 /** Compile mkdir + move operations; directories that already exist are observed, not claimed. */
 export async function compileOps(fs: FsPort, plan: MovePlan): Promise<CompiledOp[]> {
   const ops: CompiledOp[] = []
@@ -119,7 +126,9 @@ function appliedOps(records: JournalRecord[]): Map<number, { intent: JournalReco
 
 export async function applyPlan(ctx: ExecContext, plan: MovePlan, approval: Approval | null, blockers: string[] = []): Promise<RunReport> {
   if (!approvalIsCurrent(plan, approval)) throw new RunRefused('The plan is not approved, or it changed after approval.')
-  if (blockers.length > 0) throw new RunRefused(blockers.join(' '))
+  // Callers may pass blockers, but the core also derives them so no caller can skip them.
+  const allBlockers = [...new Set([...blockers, ...newWorkBlockers(await listRuns(ctx.store))])]
+  if (allBlockers.length > 0) throw new RunRefused(allBlockers.join(' '))
   if (plan.rows.length === 0) throw new RunRefused('The plan has no accepted rows.')
   if (plan.profile !== ctx.fs.profile) throw new RunRefused(`A ${plan.profile} plan cannot run on a ${ctx.fs.profile} root.`)
   if (plan.rootId !== ctx.fs.rootId) throw new RunRefused('The plan belongs to a different root.')
@@ -193,6 +202,10 @@ export async function applyPlan(ctx: ExecContext, plan: MovePlan, approval: Appr
       await assert()
       if (!(await matches(ctx.fs, op.from, await ctx.fs.stat(op.from), op.expected))) {
         throw new Halt(`Source ${op.from} changed before unlink. Recovery is required.`)
+      }
+      // Last check before removing a name: both names must still be the same file.
+      if (!(await sameIdentity(ctx.fs, op.from, op.to))) {
+        throw new Halt(`Destination ${op.to} no longer names the same file; the source is kept. Recovery is required.`)
       }
       try {
         await ctx.fs.unlink(op.from)
@@ -290,7 +303,9 @@ export async function reverseRun(ctx: ExecContext, runId: string, mode: 'rollbac
   if (mode === 'undo' && !(state.status === 'committed' || (state.status === 'needs_attention' && state.phase === 'undo'))) {
     throw new RunRefused(`Run ${runId} is ${state.status}; only a committed run can be undone.`)
   }
-  if (blockers.length > 0) throw new RunRefused(blockers.join(' '))
+  const derived = mode === 'undo' ? undoBlockers(await listRuns(ctx.store), runId) : []
+  const allBlockers = [...new Set([...blockers, ...derived])]
+  if (allBlockers.length > 0) throw new RunRefused(allBlockers.join(' '))
   if (computeDigest(plan) !== plan.digest) throw new RunRefused('Stored plan digest does not match its contents.')
 
   const checkpoint = ctx.checkpoint ?? noCheckpoint
@@ -375,6 +390,12 @@ export async function reverseRun(ctx: ExecContext, runId: string, mode: 'rollbac
         continue
       }
       await assert()
+      if (!(await sameIdentity(ctx.fs, from, to))) {
+        await journal.append({ type: 'outcome', phase, opIndex: index, op: 'move', from: to, to: from, result: 'refused', detail: 'The two names diverged before unlink; both preserved.' })
+        entries.push({ opIndex: index, op: 'move', from, to, state: 'unresolved', detail: 'The two names diverged before unlink.' })
+        unresolved++
+        continue
+      }
       try {
         await ctx.fs.unlink(to)
       } catch (error) {

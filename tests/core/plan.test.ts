@@ -45,6 +45,10 @@ describe('proposal schema (T11, T30, T33, T10)', () => {
     expect(dup.accepted).toEqual([])
     expect(dup.rejected.map((r) => r.code).sort()).toEqual(['duplicate-id', 'duplicate-id', 'unknown-file'])
     expect(parseProposalResponse({ proposals: [{ ...item, confidence: 2 }] }, ids).accepted).toEqual([])
+    // A valid item must not win over a malformed second proposal for the same file.
+    const mixed = parseProposalResponse({ proposals: [item, { ...item, categoryId: 'other', path: '../..' }] }, ids)
+    expect(mixed.accepted).toEqual([])
+    expect(mixed.rejected.map((r) => r.code).sort()).toEqual(['duplicate-id', 'fields'])
   })
   it('never fabricates proposals for a failed response (T30)', async () => {
     const { scan } = await setup()

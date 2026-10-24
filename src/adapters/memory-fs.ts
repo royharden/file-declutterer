@@ -131,11 +131,12 @@ export class MemoryFs implements FsPort {
 
   async list(dir: string): Promise<DirEntry[]> {
     this.requireDir(dir)
-    const prefix = dir === '' ? '' : `${compareKey(dir)}/`
+    // Parentage comes from the stored spelling, compared by key, never from splitting a key.
+    const dirKey = compareKey(dir)
     const out: DirEntry[] = []
-    for (const [key, node] of this.nodes) {
-      if (key === '' || !key.startsWith(prefix)) continue
-      if (key.slice(prefix.length).includes('/')) continue
+    for (const node of this.nodes.values()) {
+      if (node.path === '') continue
+      if (compareKey(parentOf(node.path)) !== dirKey) continue
       out.push({ name: node.path.slice(node.path.lastIndexOf('/') + 1), kind: node.kind })
     }
     return out
@@ -166,6 +167,7 @@ export class MemoryFs implements FsPort {
 
   async rmdir(path: string): Promise<void> {
     this.maybeFail('rmdir', path)
+    if (path === '') throw new FsError('EUNSUPPORTED', 'The root cannot be removed.')
     this.requireDir(path)
     if ((await this.list(path)).length > 0) throw new FsError('ENOTEMPTY', `${path} is not empty`)
     this.nodes.delete(compareKey(path))

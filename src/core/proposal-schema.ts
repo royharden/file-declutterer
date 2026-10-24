@@ -115,10 +115,12 @@ export function parseProposalResponse(raw: unknown, fileIds: ReadonlySet<string>
     const reject = (code: string, reason: string): void => {
       rejected.push({ index, fileId, code, reason })
     }
+    // Count every occurrence of an id, including malformed ones, so a valid item cannot win
+    // over a contradictory second proposal for the same file.
+    if (fileId !== null) idCounts.set(fileId, (idCounts.get(fileId) ?? 0) + 1)
     if (!isPlainObject(entry)) return reject('not-object', 'Proposal is not an object.')
     if (!exactKeys(entry, ITEM_KEYS)) return reject('fields', 'Proposal must have exactly fileId, categoryId, basename, confidence, reason.')
     if (fileId === null || !fileIds.has(fileId)) return reject('unknown-file', 'Unknown file id.')
-    idCounts.set(fileId, (idCounts.get(fileId) ?? 0) + 1)
     const { categoryId, basename, confidence, reason } = entry
     if (typeof categoryId !== 'string' || !CATEGORY_BY_ID.has(categoryId)) {
       return reject('unknown-category', `Category ${JSON.stringify(String(categoryId)).slice(0, 60)} is not on the trusted list.`)
@@ -143,6 +145,5 @@ export function parseProposalResponse(raw: unknown, fileIds: ReadonlySet<string>
       accepted.push(item)
     }
   }
-  // Duplicate ids that were otherwise rejected still count; report every occurrence once.
   return { accepted, rejected: rejected.sort((a, b) => a.index - b.index), fatal: null }
 }

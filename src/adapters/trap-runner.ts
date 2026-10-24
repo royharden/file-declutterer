@@ -65,6 +65,29 @@ function interruptAt(n: number): { checkpoint: Checkpoint; reached: string[] } {
 }
 
 const manifest = (fs: MemoryFs): string => JSON.stringify(fs.manifest())
+
+/**
+ * T36 fixture: n loose files, each planned into its own new folder chain
+ * _Organized/x<i>/<chain...>/f<i>.txt, so every row needs 1 + chain.length new folders
+ * (plus the shared _Organized). Rows are built directly to exercise the executor budget.
+ */
+async function deepPlan(planId: string, n: number, chain: string[]): Promise<{ fs: MemoryFs; plan: MovePlan; before: string }> {
+  const fs = new MemoryFs()
+  for (let i = 0; i < n; i++) fs.writeFile(`f${i}.txt`, utf8Encode(`file ${i}`))
+  const before = manifest(fs)
+  const rows: PlanRow[] = []
+  for (let i = 0; i < n; i++) {
+    const source = `f${i}.txt`
+    const info = (await fs.stat(source))!
+    rows.push({
+      rowId: `r${i}`, fileId: `r${i}`, source, size: info.size, sha256: await fs.sha256(source), identity: info.identity,
+      categoryId: null, basename: null, destination: ['_Organized', `x${i}`, ...chain, source].join('/'),
+      provenance: 'manual-edit', batchId: null, confidence: null, reason: '', included: true, proposalIssues: [], issues: [], noop: false,
+    })
+  }
+  const scan = { scanId: `scan-${planId}`, profile: 'sandbox' as const, policyId: 'scan-policy-v1', root: { id: fs.rootId, displayHint: fs.rootDisplay } }
+  return { fs, plan: buildPlan({ planId, kind: 'organize', scan, config, rows }), before }
+}
 const FEW = ['Q3 report.pdf', 'IMG_0412.jpg', 'Downloads/song.flac']
 const codesFor = (rows: PlanRow[], path: string): string[] => rows.find((r) => r.source === path)?.issues.map((i) => i.code) ?? []
 
@@ -371,9 +394,18 @@ const CHECKS: Record<string, Check> = {
     const store = new MemoryJournalStore()
     const { plan, approval } = await approved(fs, 't34', FEW)
     await applyPlan({ fs, store }, plan, approval)
+    // Also quarantine one duplicate so both reserved roots really hold files.
+    const dscan = await scanRoot(fs, { scanId: 'dup', mode: 'duplicates' })
+    const dup = findDuplicates(dscan, config)
+    const extra = dup.groups[0]!.members[1]!
+    const qRows = validateRows(quarantineRows(dup, new Set([extra.id]), 't34-q', config), { kind: 'quarantine', config, existing: new Map(), extOf: () => '' })
+    const qPlan = buildPlan({ planId: 't34-q', kind: 'quarantine', scan: dscan, config, rows: qRows })
+    await applyPlan({ fs, store }, qPlan, approve(qPlan, 'trap'))
+    const paths = fs.allPaths().filter((p) => p.kind === 'file').map((p) => p.path)
+    const populated = paths.some((p) => p.startsWith('_Organized/')) && paths.some((p) => p.startsWith('_declutter-quarantine/'))
     const again = await scanOf(fs)
     const leaked = again.files.filter((f) => f.relPath.startsWith('_Organized') || f.relPath.startsWith('_declutter-quarantine'))
-    return { pass: leaked.length === 0, observation: `${leaked.length} output/quarantine files in a later ordinary scan` }
+    return { pass: populated && leaked.length === 0, observation: `both reserved roots populated: ${populated}; ${leaked.length} of their files in a later ordinary scan` }
   },
   async T35() {
     const fs = createSandbox()
@@ -387,14 +419,26 @@ const CHECKS: Record<string, Check> = {
     return { pass, observation: `approval survives selection edit: ${approvalIsCurrent(deselect, approval)}; output edit: ${approvalIsCurrent(output, approval)}` }
   },
   async T36() {
-    const fs = createSandbox()
+    // A: 500 moves (the file-row maximum) into 4 new folders each: 500 + 2001 operations exceed
+    // the 2000-operation budget only because folders count, so apply must refuse up front.
+    const a = await deepPlan('t36a', 500, ['a', 'b', 'c'])
+    let refused = ''
+    try {
+      await applyPlan({ fs: a.fs, store: new MemoryJournalStore() }, a.plan, approve(a.plan, 'trap'))
+    } catch (error) {
+      refused = error instanceof Error ? error.message : String(error)
+    }
+    const untouched = manifest(a.fs) === a.before
+    // B: 150 moves into 3 new folders each: 601 operations, above any fixed 500 ceiling.
+    const b = await deepPlan('t36b', 150, ['a', 'b'])
     const store = new MemoryJournalStore()
-    const { plan, approval } = await approved(fs, 't36')
-    const report = await applyPlan({ fs, store }, plan, approval)
-    const records = parseJournal((await store.readJournal('t36'))!).records
-    const mkdirs = records.filter((r) => r.type === 'intent' && r.op === 'mkdir').length
-    const undone = await reverseRun({ fs, store }, 't36', 'undo')
-    return { pass: report.status === 'committed' && mkdirs > 0 && undone.status === 'undone', observation: `${plan.rows.length} moves + ${mkdirs} folders applied and reversed without a fixed loop ceiling` }
+    const applied = await applyPlan({ fs: b.fs, store }, b.plan, approve(b.plan, 'trap'))
+    const records = parseJournal((await store.readJournal('t36b'))!).records
+    const ops = records.filter((r) => r.type === 'intent' && r.phase === 'apply').length
+    const undone = await reverseRun({ fs: b.fs, store }, 't36b', 'undo')
+    const restored = manifest(b.fs) === b.before
+    const pass = /2501 operations/.test(refused) && untouched && applied.status === 'committed' && ops === 601 && undone.status === 'undone' && restored
+    return { pass, observation: `A refused: ${refused || 'no'}; B ${ops} operations ${applied.status}, undo ${undone.status}, manifest restored: ${restored}` }
   },
   async T37() {
     const fs = createSandbox()

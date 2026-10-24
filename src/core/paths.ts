@@ -28,6 +28,16 @@ export function isDeviceName(component: string): boolean {
 }
 
 export function checkComponent(component: string): CheckResult {
+  const literal = checkComponentLiteral(component)
+  if (!literal.ok) return literal
+  // Compatibility forms (fullwidth solidus, dot, colon, small reverse solidus...) must not
+  // become path syntax in the comparison key: run the same rules on the folded spelling.
+  const folded = checkComponentLiteral(compareKey(component))
+  if (!folded.ok) return fail('folded-syntax', `name folds to path syntax (${folded.reason})`)
+  return OK
+}
+
+function checkComponentLiteral(component: string): CheckResult {
   if (component.length === 0) return fail('empty-segment', 'empty path segment')
   if (component === '.' || component === '..') return fail('traversal', 'dot or parent segment')
   if (CONTROL_CHAR.test(component)) return fail('control-char', 'control character or NUL')
