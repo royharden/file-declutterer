@@ -1,9 +1,12 @@
 import { useMemo, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import { ApplyScreen } from './ApplyScreen'
+import { DuplicatesScreen } from './DuplicatesScreen'
 import { ProposeScreen } from './ProposeScreen'
 import { ReviewScreen } from './ReviewScreen'
 import { RunsScreen } from './RunsScreen'
 import { ScanScreen } from './ScanScreen'
+import { SettingsScreen } from './SettingsScreen'
+import { TrapsScreen } from './TrapsScreen'
 import { SandboxSession } from './session'
 
 export type TabId = 'scan' | 'propose' | 'review' | 'apply' | 'runs' | 'duplicates' | 'traps' | 'settings'
@@ -14,6 +17,9 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'review', label: 'Review / Approve' },
   { id: 'apply', label: 'Apply / Recovery' },
   { id: 'runs', label: 'Runs / Undo' },
+  { id: 'duplicates', label: 'Duplicates / Restore' },
+  { id: 'traps', label: 'Traps' },
+  { id: 'settings', label: 'Settings / Help' },
 ]
 
 function useSession(session: SandboxSession): number {
@@ -65,6 +71,9 @@ export function App() {
         {tab === 'review' && <ReviewScreen session={session} onApply={() => setTab('apply')} />}
         {tab === 'apply' && <ApplyScreen session={session} onRuns={() => setTab('runs')} />}
         {tab === 'runs' && <RunsScreen session={session} />}
+        {tab === 'duplicates' && <DuplicatesScreen session={session} />}
+        {tab === 'traps' && <TrapsScreen />}
+        {tab === 'settings' && <SettingsScreen session={session} />}
       </main>
     </>
   )

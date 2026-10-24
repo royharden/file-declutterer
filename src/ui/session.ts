@@ -1,5 +1,6 @@
 import { MemoryFs, MemoryJournalStore } from '../adapters/memory-fs'
 import { createSandbox, simulatedResponse } from '../adapters/sandbox-seed'
+import { findDuplicates, quarantineRows, restoreCandidates, restoreRows, type DuplicateReport, type RestoreCandidate } from '../core/duplicates'
 import { InterruptError } from '../core/fs-port'
 import { heuristicProposals } from '../core/heuristic'
 import { parseJournal, type JournalRecord } from '../core/journal-codec'
@@ -18,8 +19,8 @@ import {
   type RunSummary,
 } from '../core/runs'
 import { scanRoot } from '../core/scan'
-import { DEFAULT_ROOT_CONFIG, type RootConfig } from '../core/scan-policy'
-import type { ProposalSource, ScanManifest } from '../core/types'
+import { DEFAULT_ROOT_CONFIG, POLICY_ID, type RootConfig } from '../core/scan-policy'
+import type { PlanKind, ProposalSource, ScanManifest } from '../core/types'
 import {
   buildOrganizeRows,
   defaultSelection,
@@ -37,6 +38,16 @@ export interface ImportedReview {
   plan: MovePlan
   note: string
   unmatched: { from: string; reason: string }[]
+}
+
+/** Quarantine and restore use their own reviewed plan, separate from the organize review. */
+export interface SidePlan {
+  kind: Extract<PlanKind, 'quarantine' | 'restore'>
+  planId: string
+  restoreOf: string | null
+  rows: PlanRow[]
+  plan: MovePlan | null
+  approval: Approval | null
 }
 
 export class SandboxSession {
@@ -67,6 +78,14 @@ export class SandboxSession {
   boundaries: string[] = []
   lastInterrupt: string | null = null
   preview: { runId: string; entries: ReversePreviewEntry[] } | null = null
+
+  // Duplicates / quarantine / restore
+  dupScan: ScanManifest | null = null
+  dupReport: DuplicateReport | null = null
+  dupSelected = new Set<string>()
+  side: SidePlan | null = null
+  restoreSource: { runId: string; candidates: RestoreCandidate[] } | null = null
+  restoreChosen = new Set<string>()
 
   private counter = 0
   private listeners = new Set<() => void>()
@@ -106,6 +125,12 @@ export class SandboxSession {
     this.boundaries = []
     this.lastInterrupt = null
     this.preview = null
+    this.dupScan = null
+    this.dupReport = null
+    this.dupSelected = new Set()
+    this.side = null
+    this.restoreSource = null
+    this.restoreChosen = new Set()
     this.changed()
   }
 
@@ -386,5 +411,103 @@ export class SandboxSession {
       this.error = null
     }
     this.changed()
+  }
+
+  // ---- duplicates, quarantine, restore ----
+
+  async scanDuplicates(): Promise<void> {
+    await this.guard(async () => {
+      this.dupScan = await scanRoot(this.fs, { scanId: this.nextId('dscan'), mode: 'duplicates', config: this.config })
+      this.dupReport = this.dupScan.status === 'complete' ? findDuplicates(this.dupScan, this.config) : null
+      this.dupSelected = new Set()
+      this.side = null
+    })
+  }
+
+  toggleDuplicate(fileId: string, selected: boolean): void {
+    const next = new Set(this.dupSelected)
+    if (selected) next.add(fileId)
+    else next.delete(fileId)
+    this.dupSelected = next
+    if (this.side?.kind === 'quarantine') this.side = null
+    this.changed()
+  }
+
+  private sideScan(): Pick<ScanManifest, 'scanId' | 'profile' | 'policyId' | 'root'> {
+    return this.dupScan ?? { scanId: this.nextId('rscan'), profile: 'sandbox', policyId: POLICY_ID, root: { id: this.fs.rootId, displayHint: this.fs.rootDisplay } }
+  }
+
+  private async finishSide(kind: SidePlan['kind'], planId: string, restoreOf: string | null, rows: PlanRow[]): Promise<void> {
+    const existing = await observeDestinations(this.fs, rows)
+    const validated = validateRows(rows, { kind, config: this.config, existing, extOf: () => '' })
+    const plan = buildPlan({ planId, kind, scan: this.sideScan(), config: this.config, rows: validated, restoreOf })
+    this.side = { kind, planId, restoreOf, rows: validated, plan, approval: null }
+  }
+
+  async reviewQuarantine(): Promise<void> {
+    await this.guard(async () => {
+      if (!this.dupReport) throw new Error('Find duplicates first.')
+      if (this.dupSelected.size === 0) throw new Error('Select at least one extra copy.')
+      const planId = this.nextId('quar')
+      await this.finishSide('quarantine', planId, null, quarantineRows(this.dupReport, this.dupSelected, planId, this.config))
+    })
+  }
+
+  async chooseRestoreRun(runId: string): Promise<void> {
+    await this.guard(async () => {
+      await this.refreshRuns()
+      const run = this.runs.find((r) => r.runId === runId)
+      const planText = await this.store.readPlan(runId)
+      if (!run || run.kind !== 'quarantine' || run.status !== 'committed' || !planText) throw new Error('Choose a committed quarantine run.')
+      const parsed = parseMovePlan(planText)
+      if (!parsed.ok) throw new Error(parsed.error)
+      this.restoreSource = { runId, candidates: restoreCandidates(parsed.plan, run.movedTo) }
+      this.restoreChosen = new Set()
+      if (this.side?.kind === 'restore') this.side = null
+    })
+  }
+
+  toggleRestore(quarantined: string, chosen: boolean): void {
+    const next = new Set(this.restoreChosen)
+    if (chosen) next.add(quarantined)
+    else next.delete(quarantined)
+    this.restoreChosen = next
+    if (this.side?.kind === 'restore') this.side = null
+    this.changed()
+  }
+
+  async reviewRestore(): Promise<void> {
+    await this.guard(async () => {
+      if (!this.restoreSource || this.restoreChosen.size === 0) throw new Error('Choose a quarantine run and at least one entry.')
+      const rows = await restoreRows(this.fs, this.restoreSource.candidates, this.restoreChosen)
+      await this.finishSide('restore', this.nextId('rest'), this.restoreSource.runId, rows)
+    })
+  }
+
+  get sideApprovalCurrent(): boolean {
+    return this.side !== null && approvalIsCurrent(this.side.plan, this.side.approval)
+  }
+
+  approveSide(): void {
+    if (!this.side?.plan || this.side.plan.rows.length === 0) return
+    this.side = { ...this.side, approval: approve(this.side.plan, new Date().toISOString()) }
+    this.changed()
+  }
+
+  async applySide(): Promise<void> {
+    const side = this.side
+    if (!side?.plan) return
+    await this.refreshRuns()
+    const plan = side.plan
+    await this.runAction((ctx) => applyPlan(ctx, plan, side.approval, newWorkBlockers(this.runs)))
+    if (this.runs.some((r) => r.runId === plan.planId)) {
+      this.side = null
+      this.dupSelected = new Set()
+      this.dupReport = null
+      this.dupScan = null
+      this.restoreSource = null
+      this.restoreChosen = new Set()
+      this.changed()
+    }
   }
 }
