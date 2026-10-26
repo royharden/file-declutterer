@@ -1,4 +1,4 @@
-import { sha256Text, SHA256_HEX } from './fingerprint.js'
+import { sha256Text, SHA256_HEX, utf8Encode } from './fingerprint.js'
 import { EXTENSION_POLICY, splitExtension } from './paths.js'
 import { CATEGORIES } from './proposal-schema.js'
 import type { RootConfig } from './scan-policy.js'
@@ -171,7 +171,7 @@ const isStrOrNull = (v: unknown): v is string | null => v === null || isStr(v)
 
 /** Strict, bounded parse. The result is review material only; execution needs reconstruction. */
 export function parseMovePlan(text: string): ParseResult {
-  if (text.length > PLAN_LIMITS.maxBytes) return { ok: false, error: 'Plan file is larger than 4 MiB.' }
+  if (text.length > PLAN_LIMITS.maxBytes || utf8Encode(text).byteLength > PLAN_LIMITS.maxBytes) return { ok: false, error: 'Plan file is larger than 4 MiB.' }
   let raw: unknown
   try {
     raw = JSON.parse(text)

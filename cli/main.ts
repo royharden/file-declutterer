@@ -3,7 +3,7 @@ import * as fsp from 'node:fs/promises'
 import { parseArgs } from 'node:util'
 import { findDuplicates, quarantineRows, restoreCandidates, restoreRows } from '../src/core/duplicates.js'
 import { ambiguousFileIds, heuristicProposals } from '../src/core/heuristic.js'
-import { approve, buildPlan, computeDigest, parseMovePlan, reconstructOrganizeRows, type MovePlan } from '../src/core/plan.js'
+import { approve, buildPlan, computeDigest, parseMovePlan, reconstructOrganizeRows, PLAN_LIMITS, type MovePlan } from '../src/core/plan.js'
 import { categoryById, type ParsedProposals } from '../src/core/proposal-schema.js'
 import { applyPlan, listRuns, newWorkBlockers, previewReverse, reverseRun, undoBlockers, type ExecContext, type RunReport } from '../src/core/runs.js'
 import { scanRoot } from '../src/core/scan.js'
@@ -151,6 +151,24 @@ async function scanFor(fs: NodeFs, scanId: string = newId('scan')): Promise<Scan
 async function validated(fs: NodeFs, scan: ScanManifest, rows: PlanRow[]): Promise<PlanRow[]> {
   const extOf = (id: string): string => scan.files.find((f) => f.id === id)?.ext ?? ''
   return validateRows(rows, { kind: 'organize', config: DEFAULT_ROOT_CONFIG, existing: await observeDestinations(fs, rows), extOf })
+}
+
+/** Read at most the import byte cap, including when the input grows after opening. */
+async function readPlanInput(file: string): Promise<string> {
+  const handle = await fsp.open(file, 'r')
+  try {
+    const stat = await handle.stat()
+    if (!stat.isFile() || stat.size > PLAN_LIMITS.maxBytes) throw new Usage('Plan must be a regular file no larger than 4 MiB.')
+    const buffer = Buffer.alloc(PLAN_LIMITS.maxBytes + 1)
+    let total = 0
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, null)
+      if (bytesRead === 0) break
+      total += bytesRead
+    }
+    if (total > PLAN_LIMITS.maxBytes) throw new Usage('Plan file is larger than 4 MiB.')
+    return buffer.subarray(0, total).toString('utf8')
+  } finally { await handle.close() }
 }
 
 /** Reconstruct an exported native plan against a fresh local scan; the plan's rows are the selection. */
@@ -321,7 +339,7 @@ async function run(argv: string[]): Promise<number> {
       if (!values.plan) throw new Usage('validate needs --plan <plan.json>.')
       const o = await openRoot(root, unmanaged, false)
       if (!o) return EXIT.refused
-      const r = await reconstruct(o, await fsp.readFile(values.plan, 'utf8'))
+      const r = await reconstruct(o, await readPlanInput(values.plan))
       if (!r) return EXIT.refused
       printRows(r.rows)
       out(`fresh digest ${r.fresh.digest}`)
@@ -333,7 +351,7 @@ async function run(argv: string[]): Promise<number> {
       if (!values.plan || !values.confirm) throw new Usage('apply needs --plan <plan.json> and --confirm <digest>.')
       const o = await openRoot(root, unmanaged, true)
       if (!o) return EXIT.refused
-      const planText = await fsp.readFile(values.plan, 'utf8')
+      const planText = await readPlanInput(values.plan)
       return withWrite(o, async (ctx) => {
         const r = await reconstruct(o, planText)
         if (!r) throw new Error('Plan reconstruction failed.')
