@@ -1,6 +1,7 @@
+import { utf8Encode } from './fingerprint.js'
 import { checkProposedBasename, splitExtension } from './paths.js'
 
-// Proposal v1 (PLAN §5). A model or the heuristic suggests only a trusted category id and a
+// Proposal v1 (PLAN Â§5). A model or the heuristic suggests only a trusted category id and a
 // basename without extension. Code builds the destination and reattaches the exact original
 // suffix. Anything off-contract is rejected visibly; nothing is mapped, stripped or decoded.
 
@@ -84,7 +85,7 @@ function exactKeys(value: Record<string, unknown>, expected: string[]): boolean 
 
 /** Parse response text with a byte bound before JSON.parse. */
 export function parseProposalText(text: string, fileIds: ReadonlySet<string>): ParsedProposals {
-  if (text.length > PROPOSAL_LIMITS.maxResponseBytes) {
+  if (utf8Encode(text).byteLength > PROPOSAL_LIMITS.maxResponseBytes) {
     return { accepted: [], rejected: [], fatal: `Response larger than ${PROPOSAL_LIMITS.maxResponseBytes} bytes.` }
   }
   let raw: unknown
