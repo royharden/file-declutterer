@@ -189,7 +189,7 @@ export class SandboxSession {
       this.imported = null
       const rows = buildOrganizeRows(scan, parsed, source, this.batchId, this.config)
       const validated = await this.validate(rows)
-      this.rows = await this.validate(defaultSelection(validated))
+      this.rows = await this.validate(validated)
       this.rebuildPlan()
     })
   }
