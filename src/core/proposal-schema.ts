@@ -84,7 +84,7 @@ function exactKeys(value: Record<string, unknown>, expected: string[]): boolean 
 
 /** Parse response text with a byte bound before JSON.parse. */
 export function parseProposalText(text: string, fileIds: ReadonlySet<string>): ParsedProposals {
-  if (text.length > PROPOSAL_LIMITS.maxResponseBytes) {
+  if (new TextEncoder().encode(text).byteLength > PROPOSAL_LIMITS.maxResponseBytes) {
     return { accepted: [], rejected: [], fatal: `Response larger than ${PROPOSAL_LIMITS.maxResponseBytes} bytes.` }
   }
   let raw: unknown
