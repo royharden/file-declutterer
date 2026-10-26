@@ -24,6 +24,8 @@ export interface RootMutex {
   readonly name: string
   /** True while the OS mutex is still held by this process. */
   held(): boolean
+  /** Fresh worker round-trip before a native mutation; communication loss refuses. */
+  assertHeld?(): Promise<void>
   release(): Promise<void>
 }
 

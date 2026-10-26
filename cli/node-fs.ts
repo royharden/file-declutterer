@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import * as fsp from 'node:fs/promises'
 import * as path from 'node:path'
+import type { PlatformHelper } from './platform/helper.js'
+import { qualifiedRootId } from './qualify.js'
 import { isWithin } from './within.js'
 import { ancestorsOf, FsError, type DirEntry, type FsErrorCode, type FsPort, type StatInfo } from '../src/core/fs-port.js'
 
@@ -25,6 +27,8 @@ export interface NodeFsOptions {
   writesEnabled: boolean
   /** Whether file identities are qualified; unqualified identities are reported as null. */
   identityQualified: boolean
+  /** Only supplied after the real platform helper has been explicitly qualified. */
+  helper?: PlatformHelper
 }
 
 export class NodeFs implements FsPort {
@@ -54,9 +58,29 @@ export class NodeFs implements FsPort {
   private async assertAncestry(rel: string): Promise<void> {
     const rootInfo = await fsp.lstat(this.root, { bigint: true })
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new FsError('EUNSUPPORTED', 'Root is no longer a plain directory.')
-    // Same derivation as cli/qualify.ts: a renamed-away root replaced by a look-alike halts here.
-    const currentId = `r-${createHash('sha256').update(`${rootInfo.dev}:${rootInfo.ino}`).digest('hex').slice(0, 16)}`
+    const helper = this.options.helper
+    if (helper && (!helper.available || !this.options.identityQualified)) throw new FsError('EUNSUPPORTED', 'Qualified helper unavailable.')
+    // Same derivation as qualification; helpers never mix 128-bit IDs with portable stat IDs.
+    const currentId = helper ? qualifiedRootId(await helper.fileId(this.root)) : `r-${createHash('sha256').update(`${rootInfo.dev}:${rootInfo.ino}`).digest('hex').slice(0, 16)}`
     if (currentId !== this.rootId) throw new FsError('EUNSUPPORTED', 'Root identity changed since qualification; refusing.')
+    if (helper) {
+      // Inspect the nearest existing leaf, including all its existing ancestry. Missing
+      // destination components do not skip the existing parent safety check.
+      let existing = this.resolve(rel)
+      for (;;) {
+        try { await fsp.lstat(existing); break } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || existing === this.root) throw error
+          existing = path.dirname(existing)
+        }
+      }
+      const rootFileId = await helper.fileId(this.root)
+      const facts = await helper.components(existing)
+      if (!facts.length) throw new FsError('EUNSUPPORTED', 'No native ancestry facts.')
+      for (const c of facts) {
+        if (c.reparse || c.cloudPlaceholder) throw new FsError('EUNSUPPORTED', 'Native path has reparse/cloud ancestry.')
+        if (isWithin(c.path, this.root) && c.fileId.split(':')[0] !== rootFileId.split(':')[0]) throw new FsError('EUNSUPPORTED', 'Native path crosses a volume.')
+      }
+    }
     for (const ancestor of ancestorsOf(rel)) {
       let info
       try {
@@ -77,6 +101,7 @@ export class NodeFs implements FsPort {
 
   async list(dir: string): Promise<DirEntry[]> {
     try {
+      if (this.options.helper) await this.assertAncestry(dir)
       const entries = await fsp.readdir(this.resolve(dir), { withFileTypes: true })
       return entries.map((e) => ({
         name: e.name,
@@ -89,13 +114,14 @@ export class NodeFs implements FsPort {
 
   async stat(rel: string): Promise<StatInfo | null> {
     try {
+      if (this.options.helper) await this.assertAncestry(rel)
       const info = await fsp.lstat(this.resolve(rel), { bigint: true })
       const kind = info.isSymbolicLink() ? 'link' : info.isDirectory() ? 'dir' : info.isFile() ? 'file' : 'other'
       return {
         kind,
         size: Number(info.size),
         mtimeMs: Number(info.mtimeMs),
-        identity: this.options.identityQualified ? `${info.dev.toString(16)}:${info.ino.toString(16)}` : null,
+        identity: this.options.identityQualified ? (this.options.helper ? await this.options.helper.fileId(this.resolve(rel)) : `${info.dev.toString(16)}:${info.ino.toString(16)}`) : null,
         linkCount: Number(info.nlink),
       }
     } catch (error) {
@@ -105,9 +131,10 @@ export class NodeFs implements FsPort {
   }
 
   async sha256(rel: string): Promise<string> {
+    if (this.options.helper) await this.assertAncestry(rel)
     const full = this.resolve(rel)
     const info = await fsp.lstat(full)
-    if (!info.isFile()) throw new FsError('EIO', `${rel} is not a regular file`)
+    if (!info.isFile() || info.isSymbolicLink()) throw new FsError('EIO', `${rel} is not a regular file`)
     return new Promise((resolve, reject) => {
       const hash = createHash('sha256')
       createReadStream(full)
@@ -122,6 +149,7 @@ export class NodeFs implements FsPort {
     await this.assertAncestry(rel)
     try {
       await fsp.mkdir(this.resolve(rel))
+      await this.options.helper?.flushDirectory(path.dirname(this.resolve(rel)))
     } catch (error) {
       throw mapError(error)
     }
@@ -132,6 +160,7 @@ export class NodeFs implements FsPort {
     await this.assertAncestry(rel)
     try {
       await fsp.rmdir(this.resolve(rel))
+      await this.options.helper?.flushDirectory(path.dirname(this.resolve(rel)))
     } catch (error) {
       throw mapError(error)
     }
@@ -144,6 +173,7 @@ export class NodeFs implements FsPort {
     try {
       // link(2)/CreateHardLinkW fail when dst exists: exclusive by construction, never overwrites.
       await fsp.link(this.resolve(src), this.resolve(dst))
+      await this.options.helper?.flushDirectory(path.dirname(this.resolve(dst)))
     } catch (error) {
       throw mapError(error)
     }
@@ -154,6 +184,7 @@ export class NodeFs implements FsPort {
     await this.assertAncestry(rel)
     try {
       await fsp.unlink(this.resolve(rel))
+      await this.options.helper?.flushDirectory(path.dirname(this.resolve(rel)))
     } catch (error) {
       throw mapError(error)
     }

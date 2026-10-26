@@ -19,6 +19,10 @@ export interface Qualification {
   notes: string[]
 }
 
+export function qualifiedRootId(fileId: string): string {
+  return `r-${createHash('sha256').update(`win32:${fileId}`).digest('hex')}`
+}
+
 const SYNC_SEGMENT = /^(onedrive( - .*)?|dropbox|google drive|googledrive|my drive|icloud ?drive|box|box sync|pcloud ?drive|mega)$/i
 
 function syncRootsFromEnv(env: NodeJS.ProcessEnv): string[] {
@@ -86,7 +90,7 @@ export async function qualifyRoot(input: string, helper: PlatformHelper, options
 
   const readOk = reasons.length === 0
   // Root identity from the volume serial and file index Node reports. Path is only a hint.
-  const rootId = readOk ? `r-${createHash('sha256').update(`${info.dev}:${info.ino}`).digest('hex').slice(0, 16)}` : null
+  let rootId = readOk ? `r-${createHash('sha256').update(`${info.dev}:${info.ino}`).digest('hex').slice(0, 16)}` : null
   notes.push('Cloud-sync detection is heuristic; the folder must also be explicitly unmanaged (--unmanaged).')
 
   let writeOk = readOk
@@ -107,11 +111,15 @@ export async function qualifyRoot(input: string, helper: PlatformHelper, options
       const volume = await helper.volume(rootPath)
       if (volume.fileSystem.toUpperCase() !== 'NTFS') reasons.push(`Volume file system ${volume.fileSystem} is not supported.`)
       if (volume.remote) reasons.push('Mapped network volumes are not supported.')
+      if (volume.removable) reasons.push('Removable volumes are not supported.')
       const components = await helper.components(rootPath)
       for (const c of components) {
         if (c.reparse) reasons.push(`Component ${c.path} is a reparse point.`)
         if (c.cloudPlaceholder) reasons.push(`Component ${c.path} is a cloud placeholder.`)
       }
+      const rootFileId = await helper.fileId(rootPath)
+      if (!/^[0-9a-f]{16}:[0-9a-f]{32}$/i.test(rootFileId)) throw new Error('Qualified root identity is unavailable.')
+      rootId = qualifiedRootId(rootFileId)
       identityQualified = reasons.length === 0
       writeOk = writeOk && identityQualified
     } catch (error) {
