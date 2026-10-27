@@ -6,8 +6,8 @@ import type { FileRecord } from '../src/core/types.js'
 
 // Optional local model adapter (PLAN §5). CLI only; loopback only. The request uses the
 // OpenAI-compatible chat-completions shape that local servers such as Ollama expose at
-// <base>/v1/chat/completions. That protocol choice is NOT yet verified against official
-// documentation (deferred item); until DECLUTTER_MODEL_URL and DECLUTTER_MODEL_NAME are set the
+// <base>/v1/chat/completions. Protocol verified 2026-10-26 against the official local-server
+// example: https://docs.ollama.com/api/openai-compatibility . Until config names are set the
 // CLI says "Local AI not configured" and heuristic mode works alone. No cloud fallback, no
 // retries, no model installation, no paid call.
 
@@ -178,10 +178,12 @@ export async function runLocalAi(
     }
     try {
       await assertLoopback(config.endpoint)
+      const body = requestBody(config.model, batch)
+      if (Buffer.byteLength(body, 'utf8') > LOCAL_AI_LIMITS.maxRequestBytes) throw new Error('Request exceeds the byte limit.')
       const response = await fetchImpl(config.endpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: requestBody(config.model, batch),
+        body,
         redirect: 'manual',
         signal: AbortSignal.timeout(Math.min(LOCAL_AI_LIMITS.attemptMs, remaining)),
       })

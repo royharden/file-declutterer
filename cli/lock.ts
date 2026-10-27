@@ -46,7 +46,13 @@ async function readOwner(file: string): Promise<LockOwner | 'absent' | 'unreadab
   }
   try {
     const parsed = JSON.parse(text) as LockOwner
-    if (typeof parsed.token !== 'string' || typeof parsed.pid !== 'number') return 'unreadable'
+    if (!parsed || Object.keys(parsed).sort().join(',') !== 'acquiredAt,host,pid,processStart,rootId,token' ||
+      typeof parsed.token !== 'string' || !/^[a-f0-9]{32}$/.test(parsed.token) ||
+      !Number.isSafeInteger(parsed.pid) || parsed.pid < 1 ||
+      typeof parsed.rootId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(parsed.rootId) ||
+      typeof parsed.host !== 'string' || parsed.host.length < 1 || parsed.host.length > 255 ||
+      typeof parsed.processStart !== 'string' || parsed.processStart.length < 1 || parsed.processStart.length > 128 ||
+      typeof parsed.acquiredAt !== 'string' || !Number.isFinite(Date.parse(parsed.acquiredAt))) return 'unreadable'
     return parsed
   } catch {
     return 'unreadable'
@@ -59,6 +65,7 @@ export async function acquireRootLock(stateDir: string, rootId: string, helper: 
   const file = path.join(stateDir, 'LOCK')
   let retired: LockOwner | null = null
   try {
+    await mutex.assertHeld?.()
     const existing = await readOwner(file)
     if (existing === 'unreadable') throw new LockRefused('LOCK exists but cannot be read; resolve it manually.')
     if (existing !== 'absent') {
@@ -69,6 +76,7 @@ export async function acquireRootLock(stateDir: string, rootId: string, helper: 
         // Owner process is gone. Still under the mutex: re-read to be sure it is the same marker.
         const again = await readOwner(file)
         if (again === 'absent' || again === 'unreadable' || again.token !== existing.token) throw new LockRefused('LOCK changed during inspection.')
+        await mutex.assertHeld?.()
         await fsp.rename(file, path.join(stateDir, `LOCK.retired-${existing.token.slice(0, 8)}-${Date.now()}`))
         retired = existing
       } else if (start === existing.processStart) {
@@ -80,6 +88,7 @@ export async function acquireRootLock(stateDir: string, rootId: string, helper: 
     const processStart = await helper.processStart(process.pid)
     if (processStart === null) throw new LockRefused('Cannot verify this process identity.')
     const owner: LockOwner = { token: randomBytes(16).toString('hex'), rootId, host: os.hostname(), pid: process.pid, processStart, acquiredAt: now() }
+    await mutex.assertHeld?.()
     const handle = await fsp.open(file, 'wx')
     try {
       await handle.writeFile(JSON.stringify(owner), 'utf8')
@@ -91,14 +100,19 @@ export async function acquireRootLock(stateDir: string, rootId: string, helper: 
 
     const assert = async (): Promise<void> => {
       if (!mutex.held()) throw new LockRefused('Root mutex lost; halting.')
+      await mutex.assertHeld?.()
       const current = await readOwner(file)
       if (current === 'absent' || current === 'unreadable' || current.token !== owner.token) throw new LockRefused('Root LOCK no longer names this process; halting.')
     }
     const release = async (): Promise<void> => {
       try {
         if (mutex.held()) {
+          await mutex.assertHeld?.()
           const current = await readOwner(file)
-          if (current !== 'absent' && current !== 'unreadable' && current.token === owner.token) await fsp.unlink(file)
+          if (current !== 'absent' && current !== 'unreadable' && current.token === owner.token) {
+            await fsp.unlink(file)
+            await helper.flushDirectory(stateDir)
+          }
         }
       } finally {
         await mutex.release()

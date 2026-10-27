@@ -3,7 +3,7 @@ import * as fsp from 'node:fs/promises'
 import { parseArgs } from 'node:util'
 import { findDuplicates, quarantineRows, restoreCandidates, restoreRows } from '../src/core/duplicates.js'
 import { ambiguousFileIds, heuristicProposals } from '../src/core/heuristic.js'
-import { approve, buildPlan, computeDigest, parseMovePlan, reconstructOrganizeRows, type MovePlan } from '../src/core/plan.js'
+import { approve, buildPlan, computeDigest, parseMovePlan, reconstructOrganizeRows, PLAN_LIMITS, type MovePlan } from '../src/core/plan.js'
 import { categoryById, type ParsedProposals } from '../src/core/proposal-schema.js'
 import { applyPlan, listRuns, newWorkBlockers, previewReverse, reverseRun, undoBlockers, type ExecContext, type RunReport } from '../src/core/runs.js'
 import { scanRoot } from '../src/core/scan.js'
@@ -11,12 +11,12 @@ import { DEFAULT_ROOT_CONFIG, POLICY_ID } from '../src/core/scan-policy.js'
 import type { ScanManifest } from '../src/core/types.js'
 import { buildOrganizeRows, defaultSelection, editOrganizeRow, isBlocked, hasWarning, observeDestinations, validateRows, type PlanRow } from '../src/core/validate.js'
 import { disclosureFor, readLocalAiConfig, runLocalAi } from './local-ai.js'
-import { acquireRootLock } from './lock.js'
+import { acquireRootLock, type RootLock } from './lock.js'
 import { NodeFs } from './node-fs.js'
 import { isWithin, realLocation } from './within.js'
 import { loadPlatformHelper, type PlatformHelper } from './platform/helper.js'
 import { qualifyRoot, type Qualification } from './qualify.js'
-import { FileJournalStore, registerRoot, rootsHintingPath, rootStateDir, stateInsideRoot } from './state.js'
+import { FileJournalStore, ensurePrivateStateDirectory, registerRoot, rootsHintingPath, rootStateDir, stateInsideRoot } from './state.js'
 
 // file-declutterer CLI. The only surface that may change real files. Read-only commands work
 // on a qualified root; mutating commands (apply, recover, undo) additionally need platform
@@ -66,10 +66,15 @@ interface Opened {
   store: FileJournalStore
   fs: NodeFs
   ambiguousHistory: string[]
+  lock: RootLock | null
 }
+
+const commandResources: { helper: PlatformHelper; lock: RootLock | null }[] = []
 
 async function openRoot(root: string, unmanaged: boolean, forWrite: boolean): Promise<Opened | null> {
   const helper = loadPlatformHelper()
+  const resource = { helper, lock: null as RootLock | null }
+  commandResources.push(resource)
   const q = await qualifyRoot(root, helper, { unmanaged })
   for (const reason of q.reasons) err(`refused: ${reason}`)
   for (const note of q.notes) err(`note: ${note}`)
@@ -83,8 +88,15 @@ async function openRoot(root: string, unmanaged: boolean, forWrite: boolean): Pr
     err('refused: the private state directory would be inside the selected root.')
     return null
   }
-  await registerRoot(q.rootId, q.rootPath, new Date().toISOString())
-  const ambiguousHistory = await rootsHintingPath(q.rootPath, q.rootId)
+  const nativeHelper = helper.available ? helper : undefined
+  if (nativeHelper) {
+    await ensurePrivateStateDirectory(stateDir, nativeHelper)
+    resource.lock = await acquireRootLock(stateDir, q.rootId, nativeHelper)
+    await resource.lock.assert()
+  }
+  // Qualified commands hold one root boundary across discovery, registration, scan and apply.
+  await registerRoot(q.rootId, q.rootPath, new Date().toISOString(), undefined, nativeHelper)
+  const ambiguousHistory = await rootsHintingPath(q.rootPath, q.rootId, undefined, nativeHelper)
   if (ambiguousHistory.length > 0) {
     err(`warning: this path was previously registered under other root identities (${ambiguousHistory.join(', ')}). The folder may have been recreated or remounted; that history is not reassociated.`)
     if (forWrite) {
@@ -92,9 +104,9 @@ async function openRoot(root: string, unmanaged: boolean, forWrite: boolean): Pr
       return null
     }
   }
-  const store = new FileJournalStore(stateDir)
-  const fs = new NodeFs({ root: q.rootPath, rootId: q.rootId, writesEnabled: forWrite && q.writeOk, identityQualified: q.identityQualified })
-  return { q, helper, stateDir, store, fs, ambiguousHistory }
+  const store = new FileJournalStore(stateDir, nativeHelper)
+  const fs = new NodeFs({ root: q.rootPath, rootId: q.rootId, writesEnabled: forWrite && q.writeOk, identityQualified: q.identityQualified, helper: nativeHelper })
+  return { q, helper, stateDir, store, fs, ambiguousHistory, lock: resource.lock }
 }
 
 /** Output files (exports, reports) must never be written inside the selected root. */
@@ -141,6 +153,24 @@ async function validated(fs: NodeFs, scan: ScanManifest, rows: PlanRow[]): Promi
   return validateRows(rows, { kind: 'organize', config: DEFAULT_ROOT_CONFIG, existing: await observeDestinations(fs, rows), extOf })
 }
 
+/** Read at most the import byte cap, including when the input grows after opening. */
+async function readPlanInput(file: string): Promise<string> {
+  const handle = await fsp.open(file, 'r')
+  try {
+    const stat = await handle.stat()
+    if (!stat.isFile() || stat.size > PLAN_LIMITS.maxBytes) throw new Usage('Plan must be a regular file no larger than 4 MiB.')
+    const buffer = Buffer.alloc(PLAN_LIMITS.maxBytes + 1)
+    let total = 0
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, null)
+      if (bytesRead === 0) break
+      total += bytesRead
+    }
+    if (total > PLAN_LIMITS.maxBytes) throw new Usage('Plan file is larger than 4 MiB.')
+    return buffer.subarray(0, total).toString('utf8')
+  } finally { await handle.close() }
+}
+
 /** Reconstruct an exported native plan against a fresh local scan; the plan's rows are the selection. */
 async function reconstruct(o: Opened, planText: string): Promise<{ plan: MovePlan; rows: PlanRow[]; fresh: MovePlan } | null> {
   const parsed = parseMovePlan(planText)
@@ -180,14 +210,14 @@ async function reconstruct(o: Opened, planText: string): Promise<{ plan: MovePla
 }
 
 async function withWrite(o: Opened, action: (ctx: ExecContext) => Promise<RunReport>): Promise<number> {
-  const lock = await acquireRootLock(o.stateDir, o.q.rootId!, o.helper)
+  const lock = o.lock ?? await acquireRootLock(o.stateDir, o.q.rootId!, o.helper)
   try {
     if (lock.retired) out(`retired abandoned LOCK of process ${lock.retired.pid} (${lock.retired.acquiredAt}); inspect unresolved runs below.`)
     const report = await action({ fs: o.fs, store: o.store, assertOwnership: lock.assert })
     printReport(report)
     return report.status === 'committed' || report.status === 'rolled_back' || report.status === 'undone' ? EXIT.ok : EXIT.attention
   } finally {
-    await lock.release()
+    if (!o.lock) await lock.release()
   }
 }
 
@@ -230,7 +260,9 @@ async function run(argv: string[]): Promise<number> {
 
   switch (command) {
     case 'qualify': {
-      const q = await qualifyRoot(root, loadPlatformHelper(), { unmanaged })
+      const helper = loadPlatformHelper()
+      commandResources.push({ helper, lock: null })
+      const q = await qualifyRoot(root, helper, { unmanaged })
       out(`root ${q.rootPath}`)
       out(`  root id: ${q.rootId ?? '(none)'}; read-only: ${q.readOk ? 'yes' : 'no'}; native writes: ${q.writeOk ? 'yes' : 'no'}; identity qualified: ${q.identityQualified ? 'yes' : 'no'}`)
       for (const r of q.reasons) out(`  refused: ${r}`)
@@ -307,7 +339,7 @@ async function run(argv: string[]): Promise<number> {
       if (!values.plan) throw new Usage('validate needs --plan <plan.json>.')
       const o = await openRoot(root, unmanaged, false)
       if (!o) return EXIT.refused
-      const r = await reconstruct(o, await fsp.readFile(values.plan, 'utf8'))
+      const r = await reconstruct(o, await readPlanInput(values.plan))
       if (!r) return EXIT.refused
       printRows(r.rows)
       out(`fresh digest ${r.fresh.digest}`)
@@ -319,7 +351,7 @@ async function run(argv: string[]): Promise<number> {
       if (!values.plan || !values.confirm) throw new Usage('apply needs --plan <plan.json> and --confirm <digest>.')
       const o = await openRoot(root, unmanaged, true)
       if (!o) return EXIT.refused
-      const planText = await fsp.readFile(values.plan, 'utf8')
+      const planText = await readPlanInput(values.plan)
       return withWrite(o, async (ctx) => {
         const r = await reconstruct(o, planText)
         if (!r) throw new Error('Plan reconstruction failed.')
@@ -493,7 +525,15 @@ async function run(argv: string[]): Promise<number> {
   }
 }
 
-run(process.argv.slice(2)).then(
+async function closeCommandResources(): Promise<void> {
+  for (const resource of commandResources.reverse()) {
+    try { await resource.lock?.release() } finally {
+      await (resource.helper as PlatformHelper & { close?: () => Promise<void> }).close?.()
+    }
+  }
+}
+
+run(process.argv.slice(2)).finally(closeCommandResources).then(
   (code) => {
     process.exitCode = code
   },
