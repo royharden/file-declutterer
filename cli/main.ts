@@ -356,14 +356,14 @@ async function run(argv: string[]): Promise<number> {
         const r = await reconstruct(o, planText)
         if (!r) throw new Error('Plan reconstruction failed.')
         if (values.confirm !== r.fresh.digest || computeDigest(r.fresh) !== r.fresh.digest) throw new Error(`Typed digest does not match the fresh digest ${r.fresh.digest}.`)
-        const blockers = newWorkBlockers(await listRuns(o.store))
+        const blockers = newWorkBlockers(await listRuns(o.store, o.fs))
         return applyPlan(ctx, r.fresh, approve(r.fresh, new Date().toISOString()), blockers)
       })
     }
     case 'runs': {
       const o = await openRoot(root, unmanaged, false)
       if (!o) return EXIT.refused
-      const runs = await listRuns(o.store)
+      const runs = await listRuns(o.store, o.fs)
       if (runs.length === 0) out('no runs')
       for (const r of runs) out(`${r.runId}  ${r.kind.padEnd(10)} ${r.status}${r.phase ? ` (${r.phase})` : ''}  rows=${r.rows}${r.problem ? `  problem: ${r.problem}` : ''}${r.torn ? '  torn-tail' : ''}`)
       for (const b of newWorkBlockers(runs)) out(`blocked: ${b}`)
@@ -373,7 +373,7 @@ async function run(argv: string[]): Promise<number> {
       if (!values.run) throw new Usage('report needs --run <runId>.')
       const o = await openRoot(root, unmanaged, false)
       if (!o) return EXIT.refused
-      const runs = await listRuns(o.store)
+      const runs = await listRuns(o.store, o.fs)
       const summary = runs.find((r) => r.runId === values.run)
       if (!summary) {
         err(`unknown run ${values.run}`)
@@ -395,7 +395,7 @@ async function run(argv: string[]): Promise<number> {
       if (!values.run) throw new Usage('undo needs --run <runId>.')
       const o = await openRoot(root, unmanaged, !values.preview)
       if (!o) return EXIT.refused
-      const runs = await listRuns(o.store)
+      const runs = await listRuns(o.store, o.fs)
       const blockers = undoBlockers(runs, values.run)
       for (const b of blockers) err(`blocked: ${b}`)
       const preview = await previewReverse({ fs: o.fs, store: o.store }, values.run)
@@ -406,7 +406,7 @@ async function run(argv: string[]): Promise<number> {
         err('Not undone. Review the preview above and rerun with --yes to confirm.')
         return EXIT.refused
       }
-      return withWrite(o, async (ctx) => reverseRun(ctx, values.run!, 'undo', undoBlockers(await listRuns(o.store), values.run!)))
+      return withWrite(o, async (ctx) => reverseRun(ctx, values.run!, 'undo', undoBlockers(await listRuns(o.store, o.fs), values.run!)))
     }
     case 'duplicates': {
       const o = await openRoot(root, unmanaged, false)
@@ -465,7 +465,7 @@ async function run(argv: string[]): Promise<number> {
         const plan = await build()
         if (!plan) throw new Error('Quarantine plan could not be rebuilt.')
         if (plan.digest !== values.confirm) throw new Error(`Typed digest does not match the fresh digest ${plan.digest}.`)
-        return applyPlan(ctx, plan, approve(plan, new Date().toISOString()), newWorkBlockers(await listRuns(o.store)))
+        return applyPlan(ctx, plan, approve(plan, new Date().toISOString()), newWorkBlockers(await listRuns(o.store, o.fs)))
       })
     }
     case 'restore': {
@@ -477,7 +477,7 @@ async function run(argv: string[]): Promise<number> {
       const runId = values.run
       const planId = values['plan-id'] ?? newId('rest')
       const build = async (): Promise<MovePlan | null> => {
-        const runs = await listRuns(o.store)
+        const runs = await listRuns(o.store, o.fs)
         const source = runs.find((r) => r.runId === runId)
         const planText = await o.store.readPlan(runId)
         if (!source || source.kind !== 'quarantine' || source.status !== 'committed' || !planText) {
@@ -517,7 +517,7 @@ async function run(argv: string[]): Promise<number> {
         const plan = await build()
         if (!plan) throw new Error('Restore plan could not be rebuilt.')
         if (plan.digest !== values.confirm) throw new Error(`Typed digest does not match the fresh digest ${plan.digest}.`)
-        return applyPlan(ctx, plan, approve(plan, new Date().toISOString()), newWorkBlockers(await listRuns(o.store)))
+        return applyPlan(ctx, plan, approve(plan, new Date().toISOString()), newWorkBlockers(await listRuns(o.store, o.fs)))
       })
     }
     default:

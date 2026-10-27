@@ -66,6 +66,17 @@ function identityOf(plan: MovePlan): RunIdentity {
   return { runId: plan.planId, rootId: plan.rootId, planId: plan.planId, planDigest: plan.digest }
 }
 
+function rootProblem(fs: Pick<FsPort, 'rootId' | 'profile'>, plan: MovePlan): string | null {
+  if (plan.profile !== fs.profile) return `A ${plan.profile} plan cannot run on a ${fs.profile} root.`
+  if (plan.rootId !== fs.rootId) return 'The stored plan belongs to a different active root.'
+  return null
+}
+
+function assertPlanRoot(fs: FsPort, plan: MovePlan): void {
+  const problem = rootProblem(fs, plan)
+  if (problem) throw new RunRefused(problem)
+}
+
 async function matches(fs: FsPort, path: string, info: StatInfo | null, expected: Expected): Promise<boolean> {
   if (!info || info.kind !== 'file') return false
   if (expected.size !== null && info.size !== expected.size) return false
@@ -128,11 +139,10 @@ function appliedOps(records: JournalRecord[]): Map<number, { intent: JournalReco
 export async function applyPlan(ctx: ExecContext, plan: MovePlan, approval: Approval | null, blockers: string[] = []): Promise<RunReport> {
   if (!approvalIsCurrent(plan, approval)) throw new RunRefused('The plan is not approved, or it changed after approval.')
   // Callers may pass blockers, but the core also derives them so no caller can skip them.
-  const allBlockers = [...new Set([...blockers, ...newWorkBlockers(await listRuns(ctx.store))])]
+  const allBlockers = [...new Set([...blockers, ...newWorkBlockers(await listRuns(ctx.store, ctx.fs))])]
   if (allBlockers.length > 0) throw new RunRefused(allBlockers.join(' '))
   if (plan.rows.length === 0) throw new RunRefused('The plan has no accepted rows.')
-  if (plan.profile !== ctx.fs.profile) throw new RunRefused(`A ${plan.profile} plan cannot run on a ${ctx.fs.profile} root.`)
-  if (plan.rootId !== ctx.fs.rootId) throw new RunRefused('The plan belongs to a different root.')
+  assertPlanRoot(ctx.fs, plan)
   const checkpoint = ctx.checkpoint ?? noCheckpoint
   const assert = ctx.assertOwnership ?? (async () => {})
 
@@ -283,7 +293,8 @@ async function loadRun(store: JournalStore, runId: string): Promise<{ plan: Move
 
 /** Read-only preview of what a reversal would do now. */
 export async function previewReverse(ctx: ExecContext, runId: string): Promise<ReversePreviewEntry[]> {
-  const { records, problem } = await loadRun(ctx.store, runId)
+  const { plan, records, problem } = await loadRun(ctx.store, runId)
+  assertPlanRoot(ctx.fs, plan)
   if (problem) throw new RunRefused(`Journal needs attention: ${problem}`)
   const ops = appliedOps(records)
   const out: ReversePreviewEntry[] = []
@@ -296,6 +307,7 @@ export async function previewReverse(ctx: ExecContext, runId: string): Promise<R
 
 export async function reverseRun(ctx: ExecContext, runId: string, mode: 'rollback' | 'undo', blockers: string[] = []): Promise<RunReport> {
   const { plan, records, problem } = await loadRun(ctx.store, runId)
+  assertPlanRoot(ctx.fs, plan)
   if (problem) {
     return { ...summarize(plan, records, [], null, problem), status: 'needs_attention' }
   }
@@ -306,7 +318,7 @@ export async function reverseRun(ctx: ExecContext, runId: string, mode: 'rollbac
   if (mode === 'undo' && !(state.status === 'committed' || (state.status === 'needs_attention' && state.phase === 'undo'))) {
     throw new RunRefused(`Run ${runId} is ${state.status}; only a committed run can be undone.`)
   }
-  const derived = mode === 'undo' ? undoBlockers(await listRuns(ctx.store), runId) : []
+  const derived = mode === 'undo' ? undoBlockers(await listRuns(ctx.store, ctx.fs), runId) : []
   const allBlockers = [...new Set([...blockers, ...derived])]
   if (allBlockers.length > 0) throw new RunRefused(allBlockers.join(' '))
   if (computeDigest(plan) !== plan.digest) throw new RunRefused('Stored plan digest does not match its contents.')
@@ -497,11 +509,13 @@ export interface RunSummary {
 }
 
 /** Read-only index over stored runs in creation order. Never repairs anything. */
-export async function listRuns(store: JournalStore): Promise<RunSummary[]> {
+export async function listRuns(store: JournalStore, activeRoot?: Pick<FsPort, 'rootId' | 'profile'>): Promise<RunSummary[]> {
   const out: RunSummary[] = []
   for (const runId of await store.listRuns()) {
     try {
-      const { plan, records, problem, torn } = await loadRun(store, runId)
+      const loaded = await loadRun(store, runId)
+      const { plan, records, torn } = loaded
+      const problem = activeRoot ? rootProblem(activeRoot, plan) ?? loaded.problem : loaded.problem
       const state = currentStatus(records)
       const moved: { from: string; to: string }[] = []
       for (const rec of records) {
