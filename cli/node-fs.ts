@@ -78,6 +78,7 @@ export class NodeFs implements FsPort {
       if (!facts.length) throw new FsError('EUNSUPPORTED', 'No native ancestry facts.')
       for (const c of facts) {
         if (c.reparse || c.cloudPlaceholder) throw new FsError('EUNSUPPORTED', 'Native path has reparse/cloud ancestry.')
+        if (isWithin(c.path, this.root) && (c.hidden || c.system)) throw new FsError('EUNSUPPORTED', 'Hidden/system native path is protected.')
         if (isWithin(c.path, this.root) && c.fileId.split(':')[0] !== rootFileId.split(':')[0]) throw new FsError('EUNSUPPORTED', 'Native path crosses a volume.')
       }
     }
@@ -103,10 +104,12 @@ export class NodeFs implements FsPort {
     try {
       if (this.options.helper) await this.assertAncestry(dir)
       const entries = await fsp.readdir(this.resolve(dir), { withFileTypes: true })
-      return entries.map((e) => ({
-        name: e.name,
-        kind: e.isSymbolicLink() ? 'link' : e.isDirectory() ? 'dir' : e.isFile() ? 'file' : 'other',
-      }))
+      const result: DirEntry[] = []
+      for (const e of entries) {
+        const facts = this.options.helper && !e.isSymbolicLink() ? (await this.options.helper.components(path.join(this.resolve(dir), e.name))).at(-1) : undefined
+        result.push({ name: e.name, kind: e.isSymbolicLink() || facts?.reparse || facts?.cloudPlaceholder ? 'link' : e.isDirectory() ? 'dir' : e.isFile() ? 'file' : 'other', hidden: facts?.hidden ?? false, system: facts?.system ?? false })
+      }
+      return result
     } catch (error) {
       throw mapError(error)
     }

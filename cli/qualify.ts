@@ -94,6 +94,10 @@ export async function qualifyRoot(input: string, helper: PlatformHelper, options
   notes.push('Cloud-sync detection is heuristic; the folder must also be explicitly unmanaged (--unmanaged).')
 
   let writeOk = readOk
+  if (helper.mutationQualified === false) {
+    writeOk = false
+    notes.push('Native facts are available; native mutations remain disabled pending independent qualification.')
+  }
   let identityQualified = false
   if (process.platform !== 'win32') {
     writeOk = false
@@ -117,6 +121,8 @@ export async function qualifyRoot(input: string, helper: PlatformHelper, options
         if (c.reparse) reasons.push(`Component ${c.path} is a reparse point.`)
         if (c.cloudPlaceholder) reasons.push(`Component ${c.path} is a cloud placeholder.`)
       }
+      const leaf = components.at(-1)
+      if (leaf?.hidden || leaf?.system) reasons.push('The selected root has hidden/system attributes.')
       const rootFileId = await helper.fileId(rootPath)
       if (!/^[0-9a-f]{16}:[0-9a-f]{32}$/i.test(rootFileId)) throw new Error('Qualified root identity is unavailable.')
       rootId = qualifiedRootId(rootFileId)

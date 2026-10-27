@@ -73,7 +73,7 @@ namespace FileDeclutterer {
             if (Marshal.ReadInt32(flags)!=0) throw new InvalidOperationException("Case-sensitive directories are unsupported");
           } finally { Marshal.FreeHGlobal(flags); }
         }
-        return new { path, fileId=Identity(handle), reparse=(attrs&0x400)!=0,
+        return new { path, fileId=Identity(handle), reparse=(attrs&0x400)!=0, hidden=(attrs&2)!=0, system=(attrs&4)!=0,
           cloudPlaceholder=(attrs & (0x1000u|0x40000u|0x80000u|0x400000u))!=0 };
       }
     }
