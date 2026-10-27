@@ -7,32 +7,31 @@ Two surfaces share one TypeScript core (`src/core/`):
 - **Hosted sandbox** (`src/ui/`, built with Vite): about forty synthetic files held in memory. Banner: "Sandbox — simulated file operations; no disk changes". Reload loses the sandbox. No account, key or backend.
 - **Local CLI** (`cli/`): the only surface that may change real files, on your own machine, in one explicit unmanaged local folder. Native writes stay disabled until platform qualification passes.
 
-## Full-mode validation in progress (2026-10-26)
+## Local validation (2026-10-26)
 
-Node 24.18.0 / npm 11.11.0. Dependencies are exact and frozen by `package-lock.json`; use `npm ci`. Vite 7.3.7, Vitest 4.1.12, React plugin 5.2.0. Node >=22.12.0 is required. Local changes are candidates awaiting independent reviewer acceptance.
+The admitted implementation and independent tests are pinned at `8939be8`. Node 24.18.0 / npm 11.11.0 were used with the exact frozen lockfile (`npm ci`). Node >=22.12.0 is required; Vite 7.3.7, Vitest 4.1.12 and React plugin 5.2.0 are pinned.
 
-| Surface/check | Actual result |
+| Surface/check | Reviewed result |
 |---|---|
-| Core/contracts/sandbox tests | 68 passed across 9 files, including UTF-8 bounds, explicit inclusion and fake model response contracts |
-| Web + CLI typechecks | Passed; isolated core config also passed |
-| Web build | Passed; static dist emitted |
-| CLI build and built-bin help | Passed |
-| Portable real-filesystem harness | 5 passed / 6 TODO; disposable test folders only; does not qualify native writes |
-| Headless hosted journey | Author Chromium headless-shell built-bundle smoke passed: scan/propose/explicit selection/approve/apply and 33 sandbox traps; independent full journey pending |
-| Windows helper | Real Win32 implementation plus optional adapter integration; default loader still disabled |
-| Native release qualification | Incomplete: real facts/alias/junction/mutex/parent-loss probes and private ACL + guarded apply/undo passed after restart; full process-crash matrix and independent native gate pending |
-| Optional local AI | Official Ollama chat-completions shape checked; injected fake transport tests pass; no real model called |
-| Dependency audit | 0 advisories after patched toolchain install |
+| Product tests | 70 passed across 11 files |
+| Independent acceptance tests | 28 passed across 6 files |
+| Hosted sandbox | Independent live browser journey: 10 groups passed; 33 sandbox traps passed, 6 native cases not run |
+| Web and CLI | Both typechecks and builds passed; actual read-only CLI scan/propose/export/validate passed |
+| Native foundation | Hidden/System protection, lost-history refusal, modification-time conflicts, active-root/profile authority, locks and guarded apply/undo passed independent checks |
+| Native process crashes | 25 actual apply/undo crash boundaries passed on `e5e6fa7` only; later root-authority delta has its own actual NTFS refusal/roundtrip checks |
+| Portable filesystem harness | 5 passed / 6 TODO; this does not qualify native release |
+| Optional local AI | Fake transport contracts passed; no real model/provider called |
+| Native release | Incomplete; production mutations disabled |
 
-Default parallel worker startup failed during machine contention (no tests ran); the same suite passed with one worker. Historical failed browser and native startup attempts remain in the run records.
+The Windows loader supplies real read-only facts, including Hidden/System attributes. Its production mutation gate is off. Cross-volume/remount testing is deferred under a delegated operator decision awaiting owner review; no device, partition or volume changes are authorized. Maximum-size native qualification and other remaining native coverage are incomplete. This is no full-plan or native-release completion claim.
 
-Construction probe receipts are in `cli/platform/QUALIFICATION-RESULTS.md` and `scripts/native-integration-RESULTS.md`. They are author-run diagnostics, not independent product acceptance. Native writes remain disabled until the combined implementation and actual NTFS crash/lifecycle/ACL checks pass independent review. Browser reload still discards sandbox state.
+Serial test runs use one worker. Earlier worker-start failures and a concurrent-compilation timeout were followed by unchanged serial passing runs; run records retain both observations. Author probe receipts in `cli/platform/QUALIFICATION-RESULTS.md` and `scripts/native-integration-RESULTS.md` are diagnostics with their own pinned scope. They do not replace independent release qualification. Browser reload discards sandbox state.
 
 ## Hosted journey
 
 1. **Home / Scan**: scan the sandbox. Project folders (with `.git`, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod` or `*.sln`) are left whole; README/LICENSE/.env/lock files and hidden files are skipped.
 2. **Propose**: Heuristic (extension rules, not AI) or Simulated AI example (a fixed response replayed from fixtures, with deliberately invalid items). No model is called.
-3. **Review / Approve**: one row per file with original, exact destination, source, confidence and issues. Warnings start unselected. Blocked rows cannot be selected until you edit them. Approve the exact accepted diff and digest; any edit clears approval. Export or import plan JSON (imports are rebuilt and need fresh approval).
+3. **Review / Approve**: one row per file with original, exact destination, source, confidence and issues. All rows start unselected; explicitly select each included row. Blocked rows cannot be selected until you edit them. Approve the exact accepted diff and digest; any edit clears approval. Export or import plan JSON (imports are rebuilt and need fresh approval).
 4. **Apply / Recovery**: apply the approved plan. Optionally arm an interruption at boundary N to stop mid-run, then recover. Interruption here demonstrates the recovery logic inside the page; it is not process-crash evidence.
 5. **Runs / Undo**: journal viewer, undo preview, and an "external edit" simulation to see changed files refused.
 6. **Duplicates / Restore**: exact SHA-256 groups, a highlighted keeper suggestion, nothing preselected; a separate reviewed quarantine plan; restore from a named quarantine run.

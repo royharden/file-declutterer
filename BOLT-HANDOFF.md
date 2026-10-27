@@ -1,6 +1,6 @@
 # Bolt handoff: File Declutterer
 
-**FULL-mode local validation in progress — 2026-10-26.** Web/CLI builds, typechecks and 68 core/contract/sandbox tests passed locally. Independent acceptance and hosted full browser journey are pending; native writes remain disabled. No Bolt import/publication was performed.
+**FULL-mode local handoff — 2026-10-26.** Implementation and independent tests admitted at `8939be8`: 70 product tests, 28 independent acceptance tests, both typechecks/builds and an independent live hosted journey passed. Final combined/M7 review is separate. Native release is incomplete and production native mutations remain disabled. No Bolt import/publication was performed.
 
 ## Target
 
@@ -37,12 +37,12 @@ The local CLI (`cli/`) and any Windows qualification helper run on the user's ow
 
 | Surface | Source | Runtime |
 |---|---|---|
-| Hosted sandbox | builds locally | author smoke passed; independent full journey pending |
+| Hosted sandbox | builds locally | independent live browser journey passed (10 groups); final combined receipt tracked separately |
 | Local CLI (`cli/`, user machine only) | build/bin help passed | portable harness 5 pass/6 TODO; native writes refused |
-| Native qualification helper | Win32 implementation + optional integration | real facts/alias/junction/mutex/parent-loss/ACL/apply/undo author probes pass; full native crash and independent gate incomplete |
+| Native qualification helper | Win32 implementation + optional integration | independent local foundation checks passed, including 25 crash boundaries on e5e6fa7; root-authority delta separately requalified; full native release incomplete |
 | Bolt import / build | not attempted | pending |
 
-## Acceptance checks (pending)
+## Acceptance checks for a future Bolt import (not executed in Bolt)
 
 1. `npm ci && npm run build` succeeds in Bolt; the page opens with the sandbox banner.
 2. Home / Scan -> Propose (Heuristic) -> Review -> Approve -> Apply commits; Runs shows the journal.
@@ -53,3 +53,7 @@ The local CLI (`cli/`) and any Windows qualification helper run on the user's ow
 ## Prompt for a future Bolt run (inspection and preparation only)
 
 > Import this repository root. It is a static React + Vite app with no backend: do not create a database, auth, storage, functions or secrets, and do not apply or deploy anything under `supabase/` (inactive legacy). Run `npm install` (or `npm ci` if a lockfile exists) and `npm run build`, open the preview, and walk the acceptance checks in BOLT-HANDOFF.md. Report concrete build or runtime gaps with file and line. Make code changes only for a concrete build or deployment gap. Publish nothing.
+
+## Native release limitation
+
+The default Windows loader provides real read-only facts; `mutationQualified` remains false. The delegated cross-volume/remount deferral awaits owner review and permits no device/VHD/partition/mount changes. Maximum-size native qualification and remaining native coverage are incomplete. Historical crash receipts pin `e5e6fa7`; they are not executions of the later combined revision. No app-done, PLAN COMPLETE or native-release approval is claimed.
