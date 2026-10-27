@@ -23,6 +23,7 @@ export interface Expected {
   sha256: string | null
   identity: string | null
   size: number | null
+  mtimeMs: number | null
 }
 
 export interface JournalRecord {
@@ -118,6 +119,15 @@ export function parseJournal(text: string, identity?: Pick<RunIdentity, 'runId'>
     const keys = Object.keys(rec).sort()
     if (keys.length !== RECORD_KEYS.length || keys.some((k, j) => k !== RECORD_KEYS[j])) return bad('unexpected record fields')
     if (rec.schema !== JOURNAL_SCHEMA || rec.v !== 1) return bad('unsupported schema or version')
+    if (rec.expected !== null) {
+      const expected = rec.expected
+      if (typeof expected !== 'object' || Array.isArray(expected) || Object.keys(expected).sort().join(',') !== 'identity,mtimeMs,sha256,size') return bad('missing or unsupported expected metadata')
+      if (expected.mtimeMs !== null && !Number.isSafeInteger(expected.mtimeMs)) return bad('invalid expected modification time')
+      if (expected.size !== null && (!Number.isSafeInteger(expected.size) || expected.size < 0)) return bad('invalid expected size')
+      if (expected.sha256 !== null && (typeof expected.sha256 !== 'string' || !SHA256_HEX.test(expected.sha256))) return bad('invalid expected hash')
+      if (expected.identity !== null && typeof expected.identity !== 'string') return bad('invalid expected identity')
+    }
+    if (rec.type === 'intent' && rec.op === 'move' && (rec.expected === null || rec.expected.mtimeMs === null)) return bad('move intent lacks approved modification metadata')
     if (rec.seq !== i) return bad(`sequence ${String(rec.seq)} where ${i} expected`)
     if (rec.prev !== prev || !SHA256_HEX.test(rec.prev)) return bad('previous-record hash does not match')
     if (identity && rec.runId !== identity.runId) return bad('record belongs to another run')

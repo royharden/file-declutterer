@@ -6,3 +6,5 @@ dist-cli/
 .env.*
 !.env.example
 coverage/
+
+.agent-work/

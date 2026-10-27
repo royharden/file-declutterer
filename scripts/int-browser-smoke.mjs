@@ -1,15 +1,23 @@
+import { mkdir, readFile } from 'node:fs/promises'
 import { chromium } from 'playwright'
-const browser = await chromium.launch({ channel:'msedge', headless:true, timeout:120000 })
+const browser = await chromium.launch({ executablePath: process.env.DECLUTTER_TEST_BROWSER, headless:true, timeout:120000 })
 const page = await browser.newPage()
+page.setDefaultTimeout(90000)
 const errors=[]; const external=[]
 page.on('pageerror',e=>errors.push(e.message))
 await page.route('**/*', async route => {
  const url=new URL(route.request().url())
- if(url.origin==='http://127.0.0.1:22901') await route.continue()
+ if(url.origin===new URL(process.env.DECLUTTER_TEST_URL ?? 'http://127.0.0.1:22901/').origin) {
+  if(process.env.DECLUTTER_TEST_STATIC==='1') {
+   const asset=url.pathname==='/'?'index.html':/^\/assets\/[A-Za-z0-9_.-]+$/.test(url.pathname)?url.pathname.slice(1):null
+   if(!asset) {await route.abort();return}
+   await route.fulfill({body:await readFile(`dist/${asset}`),contentType:asset.endsWith('.js')?'text/javascript':asset.endsWith('.css')?'text/css':'text/html'})
+  } else await route.continue()
+ }
  else {external.push(url.origin); await route.abort()}
 })
 try {
- await page.goto('http://127.0.0.1:22901/',{timeout:120000})
+ await page.goto(process.env.DECLUTTER_TEST_URL ?? 'http://127.0.0.1:22901/',{timeout:120000})
  await page.getByText('Sandbox — simulated file operations; no disk changes',{exact:true}).waitFor()
  await page.getByRole('button',{name:'Scan sandbox',exact:true}).click()
  await page.getByText('Scan complete.',{exact:true}).waitFor()
@@ -28,4 +36,10 @@ try {
  console.log('TRAPS',await page.getByRole('status').innerText())
  console.log('RESULT',JSON.stringify({errors,external}))
  if(errors.length||external.length) process.exitCode=1
+} catch(error) {
+ console.error('PAGE_ERRORS',JSON.stringify(errors))
+ console.error('PAGE_BODY',(await page.locator('body').innerText()).slice(0,8000))
+ await mkdir('.agent-work/browser',{recursive:true})
+ await page.screenshot({path:'.agent-work/browser/failure.png',fullPage:true}).catch(()=>{})
+ throw error
 } finally {await browser.close()}

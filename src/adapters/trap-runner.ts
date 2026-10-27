@@ -80,7 +80,7 @@ async function deepPlan(planId: string, n: number, chain: string[]): Promise<{ f
     const source = `f${i}.txt`
     const info = (await fs.stat(source))!
     rows.push({
-      rowId: `r${i}`, fileId: `r${i}`, source, size: info.size, sha256: await fs.sha256(source), identity: info.identity,
+      rowId: `r${i}`, fileId: `r${i}`, source, size: info.size, mtimeMs: info.mtimeMs, sha256: await fs.sha256(source), identity: info.identity,
       categoryId: null, basename: null, destination: ['_Organized', `x${i}`, ...chain, source].join('/'),
       provenance: 'manual-edit', batchId: null, confidence: null, reason: '', included: true, proposalIssues: [], issues: [], noop: false,
     })

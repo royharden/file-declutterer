@@ -14,6 +14,7 @@ export interface PlanRow {
   fileId: string
   source: string
   size: number
+  mtimeMs: number
   sha256: string | null
   identity: string | null
   /** Organize rows: chosen category and basename. Quarantine/restore rows leave these null. */
@@ -88,6 +89,7 @@ export function buildOrganizeRows(
       fileId: file.id,
       source: file.relPath,
       size: file.size,
+      mtimeMs: file.mtimeMs,
       sha256: file.sha256,
       identity: file.identity,
       categoryId,

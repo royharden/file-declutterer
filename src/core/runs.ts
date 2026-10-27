@@ -69,7 +69,8 @@ function identityOf(plan: MovePlan): RunIdentity {
 async function matches(fs: FsPort, path: string, info: StatInfo | null, expected: Expected): Promise<boolean> {
   if (!info || info.kind !== 'file') return false
   if (expected.size !== null && info.size !== expected.size) return false
-  if (expected.identity !== null && info.identity !== null && info.identity !== expected.identity) return false
+  if (!Number.isSafeInteger(expected.mtimeMs) || info.mtimeMs !== expected.mtimeMs) return false
+  if (expected.identity !== null && info.identity !== expected.identity) return false
   if (expected.sha256 === null) return false
   try {
     return (await fs.sha256(path)) === expected.sha256
@@ -99,7 +100,7 @@ export async function compileOps(fs: FsPort, plan: MovePlan): Promise<CompiledOp
       if (info) throw new RunRefused(`A parent of ${row.to} exists and is not a folder: ${info.kind} at ${dir}.`)
       ops.push({ index: ops.length, op: 'mkdir', path: dir })
     }
-    ops.push({ index: ops.length, op: 'move', from: row.from, to: row.to, expected: { sha256: row.sha256, identity: row.identity, size: row.size } })
+    ops.push({ index: ops.length, op: 'move', from: row.from, to: row.to, expected: { sha256: row.sha256, identity: row.identity, size: row.size, mtimeMs: row.mtimeMs } })
   }
   if (ops.length > PLAN_LIMITS.maxOperationRows) {
     throw new RunRefused(`Plan needs ${ops.length} operations including folders; the limit is ${PLAN_LIMITS.maxOperationRows}.`)

@@ -1,6 +1,6 @@
 # Bolt handoff: File Declutterer
 
-**Dirty Mode construction — runtime unverified.** Written 2026-10-23. Nothing in this repository has been installed, built, run or tested.
+**FULL-mode local validation in progress — 2026-10-26.** Web/CLI builds, typechecks and 68 core/contract/sandbox tests passed locally. Independent acceptance and hosted full browser journey are pending; native writes remain disabled. No Bolt import/publication was performed.
 
 ## Target
 
@@ -27,19 +27,19 @@ The local CLI (`cli/`) and any Windows qualification helper run on the user's ow
 
 ## Build
 
-- Runtime: Node >= 20.11 (declared in `package.json` engines; not verified).
-- Install: no lockfile yet. First authorized `npm install` generates `package-lock.json`; afterwards `npm ci`.
-- Web build: `npm run build` -> `dist/` (typecheck + Vite). Never run.
-- The web bundle must not include `cli/`, `src/engine/` or `supabase/`; `tests/contract/web-graph.test.ts` checks the source import graph (not yet run).
-- Dependencies (pinned ranges, unverified together): react ^18.3.1, react-dom ^18.3.1, vite ^5.4.0, @vitejs/plugin-react ^4.3.1, typescript ^5.5.4, vitest ^2.0.5, @types/node ^20.14.0.
+- Runtime: Node >=22.12.0; locally exercised on Node 24.18.0 / npm 11.11.0.
+- Install: `npm ci` uses the committed lockfile and exact direct versions.
+- Web build: `npm run build` -> `dist/` (typecheck + Vite). Passed locally.
+- The web bundle must not include `cli/`, `src/engine/` or `supabase/`; `tests/contract/web-graph.test.ts` checks the source import graph (passed locally).
+- Exact direct dependencies and transitive lock are in package.json/package-lock.json; Vite 7.3.7, Vitest 4.1.12 and plugin-react 5.2.0 replace the vulnerable initial tooling.
 
 ## Status by surface
 
 | Surface | Source | Runtime |
 |---|---|---|
-| Hosted sandbox | built in source | unverified |
-| Local CLI (`cli/`, built with `npm run build:cli`, runs on the user's machine only) | built in source | unverified; native writes refused (platform helper is a stub) |
-| Native qualification helper | interface only (`cli/platform/helper.ts`) | not built |
+| Hosted sandbox | builds locally | author smoke passed; independent full journey pending |
+| Local CLI (`cli/`, user machine only) | build/bin help passed | portable harness 5 pass/6 TODO; native writes refused |
+| Native qualification helper | Win32 implementation + optional integration | real facts/alias/junction/mutex/parent-loss/ACL/apply/undo author probes pass; full native crash and independent gate incomplete |
 | Bolt import / build | not attempted | pending |
 
 ## Acceptance checks (pending)

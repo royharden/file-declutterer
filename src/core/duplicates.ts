@@ -76,6 +76,7 @@ export function quarantineRows(report: DuplicateReport, selectedIds: ReadonlySet
         fileId: file.id,
         source: file.relPath,
         size: file.size,
+        mtimeMs: file.mtimeMs,
         sha256: file.sha256,
         identity: file.identity,
         categoryId: null,
@@ -101,6 +102,7 @@ export interface RestoreCandidate {
   /** Original path to restore to. */
   original: string
   size: number
+  mtimeMs: number
   sha256: string
   identity: string | null
 }
@@ -110,7 +112,7 @@ export function restoreCandidates(plan: MovePlan, moved: { from: string; to: str
   const byFrom = new Map(plan.rows.map((r) => [r.from, r]))
   return moved.flatMap((m) => {
     const row = byFrom.get(m.from)
-    return row ? [{ quarantined: m.to, original: m.from, size: row.size, sha256: row.sha256, identity: row.identity }] : []
+    return row ? [{ quarantined: m.to, original: m.from, size: row.size, mtimeMs: row.mtimeMs, sha256: row.sha256, identity: row.identity }] : []
   })
 }
 
@@ -133,12 +135,13 @@ export async function restoreRows(fs: FsPort, candidates: RestoreCandidate[], ch
     }
     const proposalIssues: Issue[] = []
     if (!info) proposalIssues.push({ code: 'missing', severity: 'block', message: 'The quarantined file is no longer there.' })
-    else if (current !== c.sha256) proposalIssues.push({ code: 'changed', severity: 'block', message: 'The quarantined file changed; it will not be restored.' })
+    else if (current !== c.sha256 || info.size !== c.size || info.mtimeMs !== c.mtimeMs || (c.identity !== null && info.identity !== c.identity)) proposalIssues.push({ code: 'changed', severity: 'block', message: 'The quarantined file changed; it will not be restored.' })
     rows.push({
       rowId: compareKey(c.quarantined),
       fileId: `restore:${c.quarantined}`,
       source: c.quarantined,
       size: c.size,
+      mtimeMs: c.mtimeMs,
       sha256: c.sha256,
       identity: c.identity,
       categoryId: null,
