@@ -327,7 +327,7 @@ export class SandboxSession {
   }
 
   async refreshRuns(): Promise<void> {
-    this.runs = await listRuns(this.store)
+    this.runs = await listRuns(this.store, this.fs)
   }
 
   get blockers(): string[] {
