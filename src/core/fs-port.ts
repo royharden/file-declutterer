@@ -9,6 +9,8 @@ export type EntryKind = 'file' | 'dir' | 'link' | 'other'
 export interface DirEntry {
   name: string
   kind: EntryKind
+  hidden?: boolean
+  system?: boolean
 }
 
 export interface StatInfo {

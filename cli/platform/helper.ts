@@ -1,9 +1,11 @@
+import { WindowsPlatformHelper } from './windows-native.js'
+
 // Boundary for the Windows platform helper (PLAN §6-§7). Portable Node calls cannot be claimed
 // to supply volume file-system type, reparse/cloud attributes, qualified 128-bit file IDs,
 // short-name aliasing, process start identity or a named root mutex. A verified helper (a
 // small native binary or binding) must provide them, and must pass the disposable-root native
-// cases before native writes are enabled. Until then the CLI uses UnavailableHelper and stays
-// read-only.
+// cases before native writes are enabled. Read-only Windows facts are available while the
+// production mutation gate remains off.
 
 export interface VolumeFacts {
   fileSystem: string
@@ -17,6 +19,8 @@ export interface ComponentFacts {
   fileId: string
   reparse: boolean
   cloudPlaceholder: boolean
+  hidden?: boolean
+  system?: boolean
 }
 
 export interface RootMutex {
@@ -31,6 +35,8 @@ export interface RootMutex {
 
 export interface PlatformHelper {
   readonly available: boolean
+  /** Explicit release gate, separate from facts availability; test doubles may omit it. */
+  readonly mutationQualified?: boolean
   readonly version: string | null
   /** Why the helper is unavailable, for user-facing refusal messages. */
   readonly unavailableReason: string | null
@@ -78,5 +84,6 @@ export class UnavailableHelper implements PlatformHelper {
 }
 
 export function loadPlatformHelper(): PlatformHelper {
-  return new UnavailableHelper()
+  // Native facts protect read-only scans too. Shipped mutations remain gated off.
+  return process.platform === 'win32' ? new WindowsPlatformHelper(false) : new UnavailableHelper()
 }

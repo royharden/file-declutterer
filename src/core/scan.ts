@@ -84,6 +84,10 @@ export async function scanRoot(fs: FsPort, options: ScanOptions): Promise<ScanMa
           })
           continue
         }
+        if (entry.hidden || entry.system) {
+          skipped.push({ relPath, kind: entry.kind, reason: 'hidden', detail: 'Hidden or system attributes are protected; bytes and subtrees were not read.' })
+          continue
+        }
         const reason = protectionReason(relPath, config, allow)
         if (entry.kind === 'dir') {
           if (reason) {

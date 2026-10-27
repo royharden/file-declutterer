@@ -55,7 +55,7 @@ node dist-cli/main.js duplicates | quarantine --select <path> | restore --run <i
 - One explicit folder. Refused: UNC/network paths, drive roots, links/junctions in the ancestry, a real path that differs from the given path, and folders inside OneDrive or other recognizable cloud-sync roots. Detection of sync agents is heuristic, so `--unmanaged` must state that nothing syncs, backs up or indexes the folder.
 - Qualification never writes a probe. Project folders and protected names are left alone exactly as in the sandbox.
 - Private state lives in `%LOCALAPPDATA%\file-declutterer\<rootId>\` (plans, journals, LOCK), never inside the folder. The root id comes from the folder's volume and file identity; path hints never reassociate history on their own. A path that was registered under a different identity (recreated or remounted folder) blocks writes until resolved.
-- **Native writes are currently refused.** The Win32 helper implementation exists in `cli/platform/windows-native.ts`, with optional integration into the adapter/state/lock. The default loader remains unavailable until independent native qualification passes. A source implementation or injected-helper test is insufficient to enable it.
+- **Native writes are currently refused.** The Win32 helper implementation exists in `cli/platform/windows-native.ts`, with optional integration into the adapter/state/lock. The Windows loader supplies native facts for read-only scans, including Hidden/System attributes; its production mutation gate remains off until independent native qualification passes. A source implementation or injected-helper test is insufficient to enable it.
 - Local AI is optional: set `DECLUTTER_MODEL_URL` (loopback only) and `DECLUTTER_MODEL_NAME`. `--mode smart` sends only unknown-extension files; `--mode local` sends all eligible files. The CLI prints exactly what would be sent (opaque id, name, extension, parent folder name) and sends nothing without `--send-to-local-model`. Batches of at most 80 rows / 32 KiB, 64 KiB responses, 30 s per attempt, 7 attempts and 240 s per pass, no retries; failures leave those rows without AI proposals.
 
 ## Scripts
@@ -87,3 +87,5 @@ MIT (see `LICENSE`). Ideas only, no code copied, from ai-file-sorter (AGPL), ZRe
 ## Inactive legacy source
 
 `src/engine/`, `tests/*.test.ts`, `tests/pathFixtures.ts` and `supabase/` are an earlier cloud-database design kept for history. They are excluded from the web and CLI builds and from `npm test`, and must not be provisioned or deployed.
+
+Plans bind integer modification time as well as bytes, size and identity. Older unreleased plans/journals lacking that metadata are refused and preserved; create a new scan/review for imports. Missing, empty, foreign-root or unverifiable journal history remains needs_attention and blocks new mutations; it is never recreated as an empty successful run.

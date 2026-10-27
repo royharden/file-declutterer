@@ -273,9 +273,11 @@ async function loadRun(store: JournalStore, runId: string): Promise<{ plan: Move
   if (planText === null) throw new RunRefused(`Run ${runId} has no stored plan.`)
   const parsedPlan = parseMovePlan(planText)
   if (!parsedPlan.ok) throw new RunRefused(`Stored plan for ${runId} is unreadable: ${parsedPlan.error}`)
-  const journalText = (await store.readJournal(runId)) ?? ''
+  const journalText = await store.readJournal(runId)
+  if (journalText === null || journalText === '') return { plan: parsedPlan.plan, records: [], problem: 'Journal is missing or empty; recovery evidence is unavailable.', torn: false }
   const parsed = parseJournal(journalText, { runId })
-  const problem = parsed.corrupt ? `Journal line ${parsed.corrupt.line}: ${parsed.corrupt.reason}.` : null
+  const first = parsed.records[0]
+  const problem = parsed.corrupt ? `Journal line ${parsed.corrupt.line}: ${parsed.corrupt.reason}.` : !first ? 'Journal has no verified records; recovery evidence is unavailable.' : first.rootId !== parsedPlan.plan.rootId || first.planId !== parsedPlan.plan.planId || first.planDigest !== parsedPlan.plan.digest ? 'Journal belongs to a different root or plan.' : null
   return { plan: parsedPlan.plan, records: parsed.records, problem, torn: parsed.tornTail !== null }
 }
 

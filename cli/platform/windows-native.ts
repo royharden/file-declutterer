@@ -8,10 +8,13 @@ interface Reply { id: number; ok: boolean; value?: unknown; error?: string }
 interface Pending { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }
 
 /** Real Win32 facts and mutex worker. This implementation alone is not a qualification pass.
- * The shipped loader remains disabled until the native acceptance gate is independently met.
+ * The shipped mutation gate remains disabled until native acceptance is independently met.
  * A worker's EOF/parent-exit watchdog releases its OS mutex; there is no time-based lock theft.
  */
 export class WindowsPlatformHelper implements PlatformHelper {
+  // Explicit construction probes can qualify a disposable root; the shipped loader passes false.
+  constructor(readonly mutationQualified = true) {}
+
   readonly available = process.platform === 'win32'
   readonly version = 'windows-pwsh-win32-v1'
   readonly unavailableReason = this.available ? null : 'The Win32 helper requires Windows and PowerShell 7.'

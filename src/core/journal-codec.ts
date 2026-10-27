@@ -131,7 +131,7 @@ export function parseJournal(text: string, identity?: Pick<RunIdentity, 'runId'>
     if (rec.seq !== i) return bad(`sequence ${String(rec.seq)} where ${i} expected`)
     if (rec.prev !== prev || !SHA256_HEX.test(rec.prev)) return bad('previous-record hash does not match')
     if (identity && rec.runId !== identity.runId) return bad('record belongs to another run')
-    if (records.length > 0 && (rec.runId !== records[0]!.runId || rec.planDigest !== records[0]!.planDigest)) return bad('run or plan digest changed mid-journal')
+    if (records.length > 0 && (rec.runId !== records[0]!.runId || rec.rootId !== records[0]!.rootId || rec.planId !== records[0]!.planId || rec.planDigest !== records[0]!.planDigest)) return bad('run or plan digest changed mid-journal')
     let canonical: string
     try {
       canonical = canonicalJson(rec)
@@ -162,19 +162,21 @@ export class JournalWriter {
 
   static async create(store: JournalStore, identity: RunIdentity): Promise<JournalWriter> {
     const existing = await store.readJournal(identity.runId)
-    if (existing !== null && existing !== '') throw new Error(`Run ${identity.runId} already has a journal.`)
+    if (existing !== null) throw new Error(`Run ${identity.runId} already has a journal.`)
     return new JournalWriter(store, identity, 0, GENESIS, [])
   }
 
   /**
    * Open an existing run for appending. identity comes from the stored plan; every complete
-   * record must agree with it. A journal whose only content is a torn fragment is continued
-   * from genesis (the fragment is preserved first).
+   * record must agree with it. Missing/empty history or a fragment without a verified
+   * prefix is lost evidence; it is never recreated as genesis.
    */
   static async open(store: JournalStore, identity: RunIdentity): Promise<{ writer: JournalWriter | null; parsed: ParsedJournal }> {
     const runId = identity.runId
-    const text = (await store.readJournal(runId)) ?? ''
+    const text = await store.readJournal(runId)
+    if (text === null || text === '') return { writer: null, parsed: { records: [], completeText: '', tornTail: null, corrupt: { line: 1, reason: 'journal is missing or empty; recovery evidence unavailable' } } }
     const parsed = parseJournal(text, { runId })
+    if (parsed.records.length === 0 && !parsed.corrupt) return { writer: null, parsed: { ...parsed, corrupt: { line: 1, reason: 'journal has no verified prefix' } } }
     if (parsed.corrupt) return { writer: null, parsed }
     const first = parsed.records[0]
     if (first && (first.rootId !== identity.rootId || first.planId !== identity.planId || first.planDigest !== identity.planDigest)) {
