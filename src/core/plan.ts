@@ -14,6 +14,7 @@ export interface PlanOp {
   from: string
   to: string
   size: number
+  mtimeMs: number
   sha256: string
   identity: string | null
   provenance: string
@@ -119,6 +120,7 @@ export function buildPlan(input: BuildPlanInput): MovePlan {
         from: row.source,
         to: row.destination!,
         size: row.size,
+        mtimeMs: row.mtimeMs,
         sha256: row.sha256,
         identity: row.identity,
         provenance: row.provenance,
@@ -157,7 +159,7 @@ export function approvalIsCurrent(plan: MovePlan | null, approval: Approval | nu
 type ParseResult = { ok: true; plan: MovePlan } | { ok: false; error: string }
 
 const PLAN_KEYS = ['config', 'digest', 'kind', 'planId', 'policyId', 'profile', 'restoreOf', 'rootId', 'rows', 'scanId', 'schema', 'version']
-const OP_KEYS = ['batchId', 'fileId', 'from', 'identity', 'provenance', 'sha256', 'size', 'to']
+const OP_KEYS = ['batchId', 'fileId', 'from', 'identity', 'mtimeMs', 'provenance', 'sha256', 'size', 'to']
 const CONFIG_KEYS = ['categories', 'extensionPolicy', 'outputRoot', 'quarantineRoot']
 
 function keysExactly(value: unknown, keys: string[]): value is Record<string, unknown> {
@@ -204,6 +206,7 @@ export function parseMovePlan(text: string): ParseResult {
     if (!isStr(op.fileId, 200) || !isStr(op.from) || !isStr(op.to) || !isStr(op.provenance, 40)) return { ok: false, error: 'A row has malformed text fields.' }
     if (!isStr(op.sha256) || !SHA256_HEX.test(op.sha256)) return { ok: false, error: 'A row has a malformed hash.' }
     if (typeof op.size !== 'number' || !Number.isSafeInteger(op.size) || op.size < 0) return { ok: false, error: 'A row has a malformed size.' }
+    if (!Number.isSafeInteger(op.mtimeMs)) return { ok: false, error: 'A row has missing or malformed modification metadata; scan and review again.' }
     if (!isStrOrNull(op.identity) || !isStrOrNull(op.batchId)) return { ok: false, error: 'A row has malformed identity or batch fields.' }
     if (ids.has(op.fileId)) return { ok: false, error: `Duplicate file id ${op.fileId}.` }
     ids.add(op.fileId)
@@ -234,8 +237,8 @@ export function reconstructOrganizeRows(
       unmatched.push({ from: op.from, reason: 'Source is not in the current scan.' })
       continue
     }
-    if (file.sha256 !== op.sha256) {
-      unmatched.push({ from: op.from, reason: 'Source bytes differ from the plan.' })
+    if (file.sha256 !== op.sha256 || file.size !== op.size || file.mtimeMs !== op.mtimeMs || (op.identity !== null && file.identity !== op.identity)) {
+      unmatched.push({ from: op.from, reason: 'Source bytes, identity or modification metadata differ from the plan.' })
       continue
     }
     if (used.has(file.id)) continue
@@ -253,6 +256,7 @@ export function reconstructOrganizeRows(
       fileId: file.id,
       source: file.relPath,
       size: file.size,
+      mtimeMs: file.mtimeMs,
       sha256: file.sha256,
       identity: file.identity,
       categoryId: ok ? category.id : null,
