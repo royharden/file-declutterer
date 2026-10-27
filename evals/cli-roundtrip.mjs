@@ -19,7 +19,9 @@ function run(args) {
 }
 try {
   assert.equal(run(['--help']).status, 0)
-  assert.equal(run(['qualify', root, '--unmanaged']).status, 0)
+  const qualification = run(['qualify', root, '--unmanaged'])
+  assert.equal(qualification.status, 0)
+  assert.match(qualification.stdout, /read-only: yes; native writes: no/)
   assert.equal(run(['scan', root, '--unmanaged']).status, 0)
   assert.equal(run(['propose', root, '--unmanaged', '--mode', 'heuristic', '--out', planPath]).status, 0)
   const plan = JSON.parse(await readFile(planPath, 'utf8'))
@@ -28,9 +30,9 @@ try {
   assert.equal(run(['validate', root, '--unmanaged', '--plan', planPath]).status, 0)
   const refused = run(['apply', root, '--plan', planPath, '--confirm', plan.digest, '--unmanaged'])
   assert.notEqual(refused.status, 0)
-  assert.match(refused.stderr, /native writes|not available|helper/i)
+  assert.match(refused.stderr, /native writes are not available/i)
   assert.deepEqual(await readdir(root), ['report.pdf'])
   assert.deepEqual(await readFile(path.join(root, 'report.pdf')), bytes)
-  console.log('PASS CLI help/qualify/scan/propose/export/validate; unavailable helper refuses apply without changes')
+  console.log('PASS CLI help/qualify/scan/propose/export/validate; production mutation gate refuses apply without changes')
 } catch (error) { records.push({ error: String(error) }); process.exitCode = 1 }
 await writeFile(`evals/cli-roundtrip-result-${Date.now()}.json`, JSON.stringify({ candidate: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), sandbox, records }, null, 2))
