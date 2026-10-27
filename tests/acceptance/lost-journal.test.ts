@@ -8,7 +8,7 @@ import { buildOrganizeRows, observeDestinations, validateRows } from '../../src/
 import { approve, buildPlan } from '../../src/core/plan'
 import { applyPlan, listRuns, newWorkBlockers, reverseRun } from '../../src/core/runs'
 
-it.each([null, ''])('keeps a run blocked when its journal is lost (%j), PLAN T22', async lost => {
+it.each([null, '', '{"incomplete":', '\n'])('keeps a run blocked when its journal is lost (%j), PLAN T22', async lost => {
   // what_bug_this_catches: null/empty history gets a fresh genesis and a false rolled_back status.
   const fs = new MemoryFs('rv-lost-journal')
   const bytes = new Uint8Array([0, 255, 128, 17])
@@ -29,6 +29,7 @@ it.each([null, ''])('keeps a run blocked when its journal is lost (%j), PLAN T22
   const result = await reverseRun({ fs, store }, plan.planId, 'rollback')
   expect.soft(result.status).toBe('needs_attention')
   expect.soft(newWorkBlockers(await listRuns(store)).length).toBe(1)
+  expect(journal).toBe(lost)
   expect(fs.readFile('report.pdf')).toEqual(bytes)
   expect(fs.readFile('_Organized/Documents/report.pdf')).toEqual(bytes)
 })
