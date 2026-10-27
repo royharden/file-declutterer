@@ -1,7 +1,7 @@
 import { utf8Encode } from './fingerprint.js'
 import { checkProposedBasename, splitExtension } from './paths.js'
 
-// Proposal v1 (PLAN Â§5). A model or the heuristic suggests only a trusted category id and a
+// Proposal v1 (PLAN §5). A model or the heuristic suggests only a trusted category id and a
 // basename without extension. Code builds the destination and reattaches the exact original
 // suffix. Anything off-contract is rejected visibly; nothing is mapped, stripped or decoded.
 
