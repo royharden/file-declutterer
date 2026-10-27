@@ -4,7 +4,11 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { chromium } from 'playwright'
 
-const origin = 'http://127.0.0.1:22921'
+const origin = process.env.S13_RV_TEST_URL ?? 'http://127.0.0.1:22921'
+const selected = new URL(origin)
+assert.equal(selected.hostname, '127.0.0.1')
+assert.ok(Number(selected.port) >= 22900 && Number(selected.port) <= 22999)
+assert.equal(selected.username + selected.password, '')
 const observations = []
 const errors = []
 const external = []
