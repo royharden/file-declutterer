@@ -78,6 +78,11 @@ namespace FileDeclutterer {
       }
     }
     static object Components(string supplied) {
+      // Path.GetFullPath on Windows may expand 8.3 aliases. Reject the supplied spelling first.
+      if (!Path.IsPathFullyQualified(supplied) || supplied.StartsWith(@"\\"))
+        throw new InvalidOperationException("Unsupported native path");
+      if (!String.Equals(LongPath(supplied).TrimEnd('\\'),supplied.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("Short-name or noncanonical alias refused: " + supplied);
       string full=Path.GetFullPath(supplied);
       if (full.StartsWith(@"\\") || full.Length>32760) throw new InvalidOperationException("Unsupported native path");
       string root=Path.GetPathRoot(full);
