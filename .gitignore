@@ -1,0 +1,26 @@
+node_modules/
+dist/
+dist-cli/
+*.log
+.env
+.env.*
+!.env.example
+coverage/
+
+.agent-work/
+
+# Local credentials and generated diagnostics
+.creds/
+ArchiveManager-creds.txt
+*.pem
+*.key
+*.p12
+*.pfx
+*.zip
+*.7z
+*.tar.gz
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+evals/*-result*.json
+evals/*.png
